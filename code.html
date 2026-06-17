@@ -1,0 +1,338 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Code Share</title>
+<!-- PeerJS -->
+<script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Oxygen,Ubuntu,sans-serif;background:#1a1a2e;color:#eee;height:100vh;display:flex;flex-direction:column;overflow:hidden}
+
+.toolbar{background:#16213e;padding:8px 16px;display:flex;align-items:center;gap:12px;border-bottom:1px solid #2a2a4a;flex-shrink:0;flex-wrap:wrap;min-height:48px}
+.toolbar .logo{font-weight:700;font-size:16px;color:#ff6b6b;letter-spacing:0.5px}
+.toolbar .sep{width:1px;height:24px;background:#2a2a4a}
+.toolbar .status{font-size:12px;padding:3px 8px;border-radius:4px;background:#1a1a2e}
+.toolbar .status.connected{color:#4ade80}
+.toolbar .status.connecting{color:#facc15}
+.toolbar .status.disconnected{color:#f87171}
+.toolbar .status.error{color:#f87171}
+.toolbar .room-info{font-size:13px;color:#999}
+.toolbar .room-info strong{color:#eee}
+.toolbar .user-count{font-size:12px;color:#aaa}
+.toolbar button{background:#2a2a4a;border:none;color:#eee;padding:6px 12px;border-radius:4px;cursor:pointer;font-size:12px;transition:background .2s}
+.toolbar button:hover{background:#3a3a5a}
+.toolbar .spacer{flex:1}
+
+.main-split{flex:1;display:flex;overflow:hidden;min-height:0}
+@media(max-width:768px){.main-split{flex-direction:column}}
+
+.editor-pane{width:60%;display:flex;flex-direction:column;border-right:1px solid #2a2a4a;overflow:hidden}
+@media(max-width:768px){.editor-pane{width:100%;height:50%;border-right:none;border-bottom:1px solid #2a2a4a}}
+
+.pane-header{background:#16213e;padding:6px 12px;font-size:12px;font-weight:600;color:#aaa;display:flex;align-items:center;gap:8px;border-bottom:1px solid #2a2a4a;flex-shrink:0}
+.pane-header .pane-title{color:#eee;font-size:13px}
+.pane-header .pane-actions{margin-left:auto;display:flex;gap:4px}
+.pane-header button{background:transparent;border:1px solid #2a2a4a;color:#aaa;padding:2px 8px;border-radius:3px;cursor:pointer;font-size:11px}
+.pane-header button:hover{background:#2a2a4a;color:#eee}
+
+.editor-wrap{flex:1;display:flex;position:relative;overflow:hidden;min-height:0;background:#0d1117}
+.gutter{width:44px;background:#0d1117;color:#484f58;text-align:right;padding:10px 6px 10px 0;font-family:'Courier New',monospace;font-size:14px;line-height:1.5;overflow:hidden;user-select:none;flex-shrink:0;border-right:1px solid #1a1a2e;white-space:nowrap}
+.gutter div{padding-right:4px}
+.editor-textarea-wrap{flex:1;position:relative}
+.editor-textarea-wrap textarea{position:absolute;top:0;left:0;width:100%;height:100%;background:transparent;border:none;outline:none;resize:none;color:#eee;font-family:'Courier New',monospace;font-size:14px;line-height:1.5;padding:10px 12px;tab-size:2;white-space:pre;overflow-wrap:normal;overflow-x:auto;overflow-y:auto}
+.editor-textarea-wrap textarea::placeholder{color:#484f58}
+
+.preview-pane{flex:1;display:flex;flex-direction:column;overflow:hidden}
+@media(max-width:768px){.preview-pane{width:100%;height:50%}}
+.preview-pane iframe{flex:1;width:100%;border:none;background:#fff}
+
+.chat-panel{background:#16213e;border-top:1px solid #2a2a4a;flex-shrink:0;max-height:200px;display:flex;flex-direction:column;transition:max-height .3s}
+.chat-panel.collapsed{max-height:34px}
+.chat-header{display:flex;align-items:center;gap:8px;padding:6px 12px;cursor:pointer;border-bottom:1px solid #2a2a4a;flex-shrink:0}
+.chat-header span{font-size:12px;font-weight:600;color:#aaa}
+.chat-header .chat-toggle{font-size:10px;color:#666;margin-left:auto;transition:transform .3s}
+.chat-panel.collapsed .chat-toggle{transform:rotate(-90deg)}
+.chat-body{flex:1;display:flex;flex-direction:column;overflow:hidden;min-height:0}
+.chat-messages{flex:1;overflow-y:auto;padding:8px 12px;font-size:13px;line-height:1.4;min-height:0}
+.chat-messages .msg{margin-bottom:4px;word-break:break-word}
+.chat-messages .msg .sender{color:#ff6b6b;font-weight:600;font-size:11px}
+.chat-messages .msg .time{color:#666;font-size:10px;margin-left:4px}
+.chat-messages .msg .text{color:#ccc}
+.chat-input-row{display:flex;align-items:center;gap:4px;padding:4px 8px;border-top:1px solid #2a2a4a;flex-shrink:0}
+.chat-input-row input{flex:1;background:#0d1117;border:1px solid #2a2a4a;border-radius:4px;color:#eee;padding:6px 8px;font-size:13px;outline:none}
+.chat-input-row input:focus{border-color:#ff6b6b}
+.chat-input-row .emoji-btn{background:transparent;border:none;color:#aaa;cursor:pointer;font-size:16px;padding:2px 4px;border-radius:3px;line-height:1}
+.emoji-picker{display:flex;gap:2px;padding:4px 8px;border-top:1px solid #2a2a4a;flex-shrink:0;flex-wrap:wrap}
+.emoji-picker button{background:transparent;border:none;font-size:18px;cursor:pointer;padding:2px 5px;border-radius:3px;line-height:1}
+.emoji-picker button:hover{background:#2a2a4a}
+
+.modal-overlay{position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.7);display:flex;align-items:center;justify-content:center;z-index:1000}
+.modal{background:#16213e;border:1px solid #2a2a4a;border-radius:12px;padding:24px;max-width:360px;width:90%;text-align:center}
+.modal h3{color:#eee;margin-bottom:12px;font-size:16px}
+.modal p{color:#aaa;font-size:12px;margin-bottom:16px;word-break:break-all}
+.modal .qr-wrap{display:flex;justify-content:center;margin-bottom:16px}
+.modal .qr-wrap canvas,.modal .qr-wrap img{border-radius:8px;background:#fff;padding:8px}
+.modal button{background:#ff6b6b;border:none;color:#fff;padding:8px 20px;border-radius:6px;cursor:pointer;font-size:13px;margin:4px}
+.modal button:hover{background:#e05555}
+.modal button.secondary{background:#2a2a4a;color:#eee}
+.modal button.secondary:hover{background:#3a3a5a}
+::-webkit-scrollbar{width:6px;height:6px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:#2a2a4a;border-radius:3px}
+::-webkit-scrollbar-thumb:hover{background:#3a3a5a}
+</style>
+</head>
+<body>
+
+<div class="toolbar">
+  <div class="logo">⚡ CS</div>
+  <div class="sep"></div>
+  <div class="status disconnected" id="statusBadge">Starting...</div>
+  <div class="sep"></div>
+  <div class="room-info">Room: <strong id="roomDisplay">—</strong></div>
+  <div class="user-count" id="userCount"></div>
+  <div class="spacer"></div>
+  <button onclick="shareRoom()">📋 Share</button>
+  <button onclick="refreshPreview()">🔄 Refresh</button>
+</div>
+
+<div class="main-split">
+  <div class="editor-pane">
+    <div class="pane-header">
+      <span class="pane-title">✏️ HTML</span>
+      <div class="pane-actions">
+        <button onclick="clearCode()">Clear</button>
+        <button onclick="resetCode()">Reset</button>
+      </div>
+    </div>
+    <div class="editor-wrap">
+      <div class="gutter" id="gutter"></div>
+      <div class="editor-textarea-wrap">
+        <textarea id="codeEditor" spellcheck="false" placeholder="Write HTML/CSS/JS here..." oninput="onCodeChange()" onkeydown="handleTab(event)"></textarea>
+      </div>
+    </div>
+  </div>
+  <div class="preview-pane">
+    <div class="pane-header">
+      <span class="pane-title">🔍 Preview</span>
+      <div class="pane-actions">
+        <button onclick="refreshPreview()">🔄 Refresh</button>
+      </div>
+    </div>
+    <iframe id="preview" sandbox="allow-scripts allow-modals allow-same-origin"></iframe>
+  </div>
+</div>
+
+<div class="chat-panel" id="chatPanel">
+  <div class="chat-header" onclick="toggleChat()">
+    <span>💬 Chat</span>
+    <span style="font-size:11px;color:#666" id="chatUserCount"></span>
+    <span class="chat-toggle">▼</span>
+  </div>
+  <div class="chat-body">
+    <div class="chat-messages" id="chatMessages"><div class="msg" style="color:#888;font-size:12px">Connected. Share the link to code together.</div></div>
+    <div class="chat-input-row">
+      <button class="emoji-btn" onclick="toggleEmojiPicker()">😊</button>
+      <input type="text" id="chatInput" placeholder="Type a message..." onkeydown="onChatKey(event)">
+    </div>
+    <div class="emoji-picker hidden" id="emojiPicker">
+      <button onclick="sendEmoji('😂')">😂</button>
+      <button onclick="sendEmoji('👍')">👍</button>
+      <button onclick="sendEmoji('🔥')">🔥</button>
+      <button onclick="sendEmoji('👀')">👀</button>
+      <button onclick="sendEmoji('🎨')">🎨</button>
+      <button onclick="sendEmoji('✅')">✅</button>
+      <button onclick="sendEmoji('💀')">💀</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay hidden" id="shareModal">
+  <div class="modal">
+    <h3>🔗 Share Room</h3>
+    <p style="font-size:11px;color:#888">Send this link — anyone who opens it joins your room.</p>
+    <p id="shareLink">Loading...</p>
+    <div class="qr-wrap" id="qrcode"></div>
+    <button onclick="copyShareLink()">📋 Copy Link</button>
+    <button class="secondary" onclick="closeShareModal()">Close</button>
+  </div>
+</div>
+
+<script>
+const DEFAULT = '<!DOCTYPE html>\n<html>\n<head>\n  <title>Live Code</title>\n  <style>\n    body { font-family: sans-serif; padding: 2rem; background: #1a1a2e; color: #eee; }\n  </style>\n</head>\n<body>\n  <h1>Hello!</h1>\n  <p>Start editing...</p>\n</body>\n</html>';
+
+let currentCode = DEFAULT;
+let peer = null, conn = null;
+let roomId = '', userId = '';
+let chatMessages = [];
+let codeSendTimer = null, previewTimer = null;
+let emojiPickerVisible = false, isHost = false, firstLoad = true;
+
+// ====== PEERJS SETUP ======
+function startPeer() {
+  roomId = location.hash ? location.hash.slice(1) : '';
+  if (!roomId) {
+    roomId = Math.random().toString(36).slice(2,10)+'-'+Math.random().toString(36).slice(2,6);
+    location.hash = roomId;
+  }
+  document.getElementById('roomDisplay').textContent = roomId;
+
+  peer = new Peer(undefined, { debug: 0 });
+  peer.on('open', (id) => {
+    userId = id;
+    document.getElementById('statusBadge').className = 'status connected';
+    document.getElementById('statusBadge').textContent = 'Ready';
+
+    if (roomId !== id) {
+      isHost = false;
+      conn = peer.connect(roomId, { reliable: true });
+      conn.on('open', () => {
+        document.getElementById('statusBadge').textContent = 'Connected';
+        conn.on('data', handleData);
+        conn.on('close', () => setStatus('Disconnected'));
+      });
+    } else {
+      isHost = true;
+      updateCodeEditor(currentCode);
+      updatePreview();
+      document.getElementById('statusBadge').textContent = 'Hosting';
+      if (firstLoad) { firstLoad = false; setTimeout(shareRoom, 800); }
+    }
+  });
+
+  peer.on('connection', (incoming) => {
+    conn = incoming;
+    conn.on('open', () => {
+      document.getElementById('statusBadge').textContent = 'Connected';
+      if (isHost) sendFullSync();
+      conn.on('data', handleData);
+      conn.on('close', () => setStatus('Connected'));
+    });
+  });
+  peer.on('error', (err) => {
+    document.getElementById('statusBadge').className = 'status error';
+    document.getElementById('statusBadge').textContent = 'Error: ' + err.type;
+  });
+}
+
+function setStatus(t) {
+  document.getElementById('statusBadge').textContent = t;
+}
+
+function handleData(data) {
+  switch(data.type) {
+    case 'code':
+      currentCode = data.html;
+      updateCodeEditor(currentCode);
+      clearTimeout(previewTimer);
+      previewTimer = setTimeout(updatePreview, 500);
+      break;
+    case 'chat':
+      if (data.msg) { chatMessages.push(data.msg); renderChat(); }
+      break;
+    case 'sync-all':
+      if (data.html) { currentCode = data.html; updateCodeEditor(currentCode); updatePreview(); }
+      if (data.msgs) { chatMessages = data.msgs; renderChat(); }
+      break;
+    case 'sync-request':
+      if (isHost) sendFullSync();
+      break;
+  }
+}
+
+function sendData(data) { if (conn && conn.open) conn.send(data); }
+function sendFullSync() { sendData({ type: 'sync-all', html: currentCode, msgs: chatMessages }); }
+
+// ====== EDITOR ======
+const editor = document.getElementById('codeEditor');
+const gutter = document.getElementById('gutter');
+
+function updateCodeEditor(code) {
+  editor.value = code;
+  let h = '', lines = (code.match(/\n/g)||[]).length+1;
+  for (let i=1;i<=lines;i++) h += '<div>'+i+'</div>';
+  gutter.innerHTML = h;
+}
+
+function onCodeChange() {
+  currentCode = editor.value;
+  let lines = (currentCode.match(/\n/g)||[]).length+1, h='';
+  for (let i=1;i<=lines;i++) h += '<div>'+i+'</div>';
+  gutter.innerHTML = h;
+
+  clearTimeout(previewTimer);
+  previewTimer = setTimeout(updatePreview, 500);
+  clearTimeout(codeSendTimer);
+  codeSendTimer = setTimeout(() => sendData({ type: 'code', html: currentCode }), 300);
+}
+
+function handleTab(e) {
+  if (e.key === 'Tab') {
+    e.preventDefault();
+    const s=editor.selectionStart, en=editor.selectionEnd;
+    editor.value = editor.value.substring(0,s)+'  '+editor.value.substring(en);
+    editor.selectionStart=editor.selectionEnd=s+2;
+    onCodeChange();
+  }
+}
+
+function clearCode() { editor.value=''; currentCode=''; updatePreview(); sendData({type:'code',html:''}); }
+function resetCode() { currentCode=DEFAULT; updateCodeEditor(currentCode); updatePreview(); sendData({type:'code',html:currentCode}); }
+
+// ====== PREVIEW ======
+function updatePreview() {
+  const d = document.getElementById('preview').contentDocument || document.getElementById('preview').contentWindow.document;
+  d.open(); d.write(currentCode); d.close();
+}
+function refreshPreview() { updatePreview(); }
+
+// ====== CHAT ======
+function renderChat() {
+  const c = document.getElementById('chatMessages');
+  let h = '';
+  for (const m of chatMessages) {
+    const t = m.t ? new Date(m.t).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}) : '';
+    const s = m.s ? m.s.slice(0,4) : '???';
+    h += '<div class="msg"><span class="sender">'+esc(s)+'</span><span class="time">'+t+'</span><br><span class="text">'+esc(m.text)+'</span></div>';
+  }
+  c.innerHTML = h; c.scrollTop = c.scrollHeight;
+}
+function onChatKey(e) { if(e.key==='Enter'){e.preventDefault();sendChat();} }
+function sendChat() {
+  const i = document.getElementById('chatInput');
+  const t = i.value.trim(); if(!t)return;
+  i.value='';
+  const m = {s:userId,text:t,t:Date.now()};
+  chatMessages.push(m); renderChat();
+  sendData({type:'chat',msg:m});
+  if(emojiPickerVisible)toggleEmojiPicker();
+}
+function sendEmoji(e) { document.getElementById('chatInput').value=e; sendChat(); }
+function toggleEmojiPicker() { const ep=document.getElementById('emojiPicker'); emojiPickerVisible=!emojiPickerVisible; ep.classList.toggle('hidden',!emojiPickerVisible); }
+function toggleChat() { document.getElementById('chatPanel').classList.toggle('collapsed'); }
+function esc(s) { const d=document.createElement('div'); d.textContent=s; return d.innerHTML; }
+
+// ====== SHARE ======
+function shareRoom() {
+  const m=document.getElementById('shareModal'); m.classList.remove('hidden');
+  const u = location.href.split('#')[0]+'#'+roomId;
+  document.getElementById('shareLink').textContent = u;
+  const q=document.getElementById('qrcode'); q.innerHTML='';
+  new QRCode(q,{text:u,width:180,height:180,colorDark:'#1a1a2e',colorLight:'#ffffff',correctLevel:QRCode.CorrectLevel.H});
+}
+function closeShareModal() { document.getElementById('shareModal').classList.add('hidden'); }
+function copyShareLink() {
+  const l=document.getElementById('shareLink').textContent;
+  navigator.clipboard.writeText(l).then(()=>alert('Link copied!')).catch(()=>{const t=document.createElement('textarea');t.value=l;document.body.appendChild(t);t.select();document.execCommand('copy');document.body.removeChild(t);alert('Link copied!');});
+}
+
+// ====== INIT ======
+updateCodeEditor(currentCode);
+updatePreview();
+startPeer();
+</script>
+</body>
+</html>
