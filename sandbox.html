@@ -1,0 +1,402 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Code Sandbox</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg-primary: #1e1e2e;
+    --bg-secondary: #181825;
+    --bg-surface: #313244;
+    --text-primary: #cdd6f4;
+    --text-secondary: #a6adc8;
+    --text-muted: #6c7086;
+    --green: #a6e3a1;
+    --green-dim: #4c9a4c;
+    --border: #45475a;
+    --accent: #89b4fa;
+    --accent-hover: #74c7ec;
+    --font-mono: 'SF Mono', 'Fira Code', 'Cascadia Code', 'JetBrains Mono', Consolas, monospace;
+    --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+  }
+
+  html, body {
+    height: 100%;
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    font-family: var(--font-sans);
+    overflow: hidden;
+  }
+
+  /* ── Header ── */
+  .header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 16px;
+    background: var(--bg-secondary);
+    border-bottom: 1px solid var(--border);
+    user-select: none;
+    flex-shrink: 0;
+  }
+
+  .header .dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: var(--green);
+    box-shadow: 0 0 6px var(--green-dim);
+    flex-shrink: 0;
+  }
+
+  .header .title {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text-primary);
+    letter-spacing: 0.3px;
+  }
+
+  .header .room-badge {
+    margin-left: auto;
+    font-size: 11px;
+    font-family: var(--font-mono);
+    background: var(--bg-surface);
+    color: var(--text-secondary);
+    padding: 3px 10px;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    max-width: 200px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  /* ── Layout ── */
+  .app {
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+  }
+
+  .main {
+    display: flex;
+    flex: 1;
+    min-height: 0;
+  }
+
+  .panel {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+  }
+
+  .panel-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 6px 14px;
+    background: var(--bg-secondary);
+    border-bottom: 1px solid var(--border);
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--text-muted);
+    flex-shrink: 0;
+  }
+
+  .panel-header .actions {
+    display: flex;
+    gap: 6px;
+  }
+
+  .panel + .panel {
+    border-left: 1px solid var(--border);
+  }
+
+  /* ── Editor ── */
+  .editor-wrapper {
+    flex: 1;
+    position: relative;
+    min-height: 0;
+  }
+
+  #editor {
+    width: 100%;
+    height: 100%;
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    font-family: var(--font-mono);
+    font-size: 13px;
+    line-height: 1.6;
+    padding: 16px;
+    border: none;
+    outline: none;
+    resize: none;
+    tab-size: 2;
+    white-space: pre;
+    overflow: auto;
+  }
+
+  #editor::placeholder {
+    color: var(--text-muted);
+  }
+
+  /* ── Preview ── */
+  .preview-wrapper {
+    flex: 1;
+    background: #fff;
+    position: relative;
+    min-height: 0;
+  }
+
+  #preview {
+    width: 100%;
+    height: 100%;
+    border: none;
+    background: #fff;
+  }
+
+  /* ── Buttons ── */
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 4px 12px;
+    font-size: 11px;
+    font-family: var(--font-sans);
+    font-weight: 500;
+    border-radius: 5px;
+    border: 1px solid var(--border);
+    background: var(--bg-surface);
+    color: var(--text-primary);
+    cursor: pointer;
+    transition: background 0.15s, border-color 0.15s;
+    line-height: 1;
+  }
+
+  .btn:hover {
+    background: #45475a;
+    border-color: var(--text-muted);
+  }
+
+  .btn:active {
+    transform: scale(0.97);
+  }
+
+  .btn-primary {
+    background: var(--accent);
+    color: #1e1e2e;
+    border-color: var(--accent);
+  }
+
+  .btn-primary:hover {
+    background: var(--accent-hover);
+    border-color: var(--accent-hover);
+  }
+
+  .btn-danger {
+    color: #f38ba8;
+    border-color: #f38ba8;
+  }
+
+  .btn-danger:hover {
+    background: rgba(243, 139, 168, 0.12);
+  }
+
+  /* ── Status ── */
+  .status-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 4px 14px;
+    background: var(--bg-secondary);
+    border-top: 1px solid var(--border);
+    font-size: 11px;
+    color: var(--text-muted);
+    flex-shrink: 0;
+  }
+
+  .status-bar .connected {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+  }
+
+  .status-bar .connected .dot-small {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--green);
+  }
+</style>
+</head>
+<body>
+<div class="app">
+  <!-- Header -->
+  <div class="header">
+    <span class="dot"></span>
+    <span class="title">Code Sandbox</span>
+    <span class="room-badge" id="roomBadge">—</span>
+  </div>
+
+  <!-- Main -->
+  <div class="main">
+    <!-- Editor -->
+    <div class="panel">
+      <div class="panel-header">
+        <span>Editor</span>
+        <div class="actions">
+          <button class="btn btn-primary" id="runBtn">&#9654; Run</button>
+          <button class="btn btn-danger" id="resetBtn">&#8634; Reset</button>
+        </div>
+      </div>
+      <div class="editor-wrapper">
+        <textarea id="editor" spellcheck="false" placeholder="Write your HTML/CSS/JS here…"></textarea>
+      </div>
+    </div>
+
+    <!-- Preview -->
+    <div class="panel">
+      <div class="panel-header">
+        <span>Preview</span>
+      </div>
+      <div class="preview-wrapper">
+        <iframe id="preview" sandbox="allow-scripts allow-modals allow-same-origin" title="Preview"></iframe>
+      </div>
+    </div>
+  </div>
+
+  <!-- Status bar -->
+  <div class="status-bar">
+    <div class="connected">
+      <span class="dot-small"></span>
+      <span id="statusText">Connected to Excalidraw</span>
+    </div>
+    <span id="charCount">0 chars</span>
+  </div>
+</div>
+
+<script>
+(function() {
+  'use strict';
+
+  const DEFAULT_CODE = `<!DOCTYPE html>
+<html>
+<head>
+  <style>
+    body { font-family: sans-serif; padding: 2rem; background: #1e1e2e; color: #cdd6f4; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; }
+    h1 { color: #a6e3a1; }
+  </style>
+</head>
+<body>
+  <h1>Hello from Code Sandbox!</h1>
+</body>
+</html>`;
+
+  // ── DOM refs ──
+  const editor       = document.getElementById('editor');
+  const preview      = document.getElementById('preview');
+  const runBtn       = document.getElementById('runBtn');
+  const resetBtn     = document.getElementById('resetBtn');
+  const roomBadge    = document.getElementById('roomBadge');
+  const statusText   = document.getElementById('statusText');
+  const charCount    = document.getElementById('charCount');
+
+  let debounceTimer  = null;
+
+  // ── Room ID from URL hash ──
+  function parseRoomId() {
+    const match = location.hash.match(/room=([^,&]+)/);
+    return match ? match[1] : null;
+  }
+
+  const roomId = parseRoomId();
+  if (roomId) {
+    roomBadge.textContent = 'room: ' + roomId;
+  }
+
+  // ── Update preview ──
+  function updatePreview() {
+    const code = editor.value;
+    preview.src = 'data:text/html;charset=utf-8,' + encodeURIComponent(code);
+  }
+
+  function debouncedUpdatePreview() {
+    clearTimeout(debounceTimer);
+    debounceTimer = setTimeout(updatePreview, 500);
+  }
+
+  // ── Update char count ──
+  function updateCharCount() {
+    const len = editor.value.length;
+    charCount.textContent = len.toLocaleString() + ' chars';
+  }
+
+  // ── PostMessage: tell parent we're ready ──
+  if (window.opener) {
+    window.opener.postMessage({ type: 'CODE_SANDBOX_READY' }, '*');
+  }
+
+  // ── Listen for code updates from collab ──
+  window.addEventListener('message', function onMessage(event) {
+    if (event.data?.type === 'CODE_UPDATE') {
+      editor.value = event.data.code;
+      updatePreview();
+      updateCharCount();
+    }
+  });
+
+  // ── When user types, send code to parent ──
+  editor.addEventListener('input', function onInput() {
+    if (window.opener) {
+      window.opener.postMessage({ type: 'CODE_FROM_SANDBOX', code: editor.value }, '*');
+    }
+    debouncedUpdatePreview();
+    updateCharCount();
+  });
+
+  // ── Keyboard shortcuts ──
+  editor.addEventListener('keydown', function onKeydown(e) {
+    // Tab in textarea inserts 2 spaces (instead of moving focus)
+    if (e.key === 'Tab') {
+      e.preventDefault();
+      const start = this.selectionStart;
+      const end   = this.selectionEnd;
+      this.value = this.value.substring(0, start) + '  ' + this.value.substring(end);
+      this.selectionStart = this.selectionEnd = start + 2;
+      this.dispatchEvent(new Event('input'));
+    }
+    // Ctrl+Enter / Cmd+Enter to run
+    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+      e.preventDefault();
+      updatePreview();
+    }
+  });
+
+  // ── Buttons ──
+  runBtn.addEventListener('click', updatePreview);
+
+  resetBtn.addEventListener('click', function onReset() {
+    editor.value = DEFAULT_CODE;
+    updatePreview();
+    updateCharCount();
+    // Notify parent of reset
+    if (window.opener) {
+      window.opener.postMessage({ type: 'CODE_FROM_SANDBOX', code: DEFAULT_CODE }, '*');
+    }
+  });
+
+  // ── Init ──
+  editor.value = DEFAULT_CODE;
+  updatePreview();
+  updateCharCount();
+
+})();
+</script>
+</body>
+</html>
