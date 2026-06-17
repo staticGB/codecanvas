@@ -3,14 +3,17 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Code Share</title>
-<!-- PeerJS -->
-<script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+<title>Collab Code</title>
+<!-- Socket.IO -->
+<script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+<!-- QRCode.js -->
 <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
 body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Oxygen,Ubuntu,sans-serif;background:#1a1a2e;color:#eee;height:100vh;display:flex;flex-direction:column;overflow:hidden}
+.hidden{display:none!important}
 
+/* Toolbar */
 .toolbar{background:#16213e;padding:8px 16px;display:flex;align-items:center;gap:12px;border-bottom:1px solid #2a2a4a;flex-shrink:0;flex-wrap:wrap;min-height:48px}
 .toolbar .logo{font-weight:700;font-size:16px;color:#ff6b6b;letter-spacing:0.5px}
 .toolbar .sep{width:1px;height:24px;background:#2a2a4a}
@@ -18,17 +21,23 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Oxygen,Ubunt
 .toolbar .status.connected{color:#4ade80}
 .toolbar .status.connecting{color:#facc15}
 .toolbar .status.disconnected{color:#f87171}
-.toolbar .status.error{color:#f87171}
 .toolbar .room-info{font-size:13px;color:#999}
 .toolbar .room-info strong{color:#eee}
+.toolbar .badge{font-size:10px;padding:2px 6px;border-radius:3px;font-weight:600}
+.toolbar .badge.host{background:#ff6b6b;color:#fff}
+.toolbar .badge.peer{background:#4a6fa5;color:#fff}
 .toolbar .user-count{font-size:12px;color:#aaa}
 .toolbar button{background:#2a2a4a;border:none;color:#eee;padding:6px 12px;border-radius:4px;cursor:pointer;font-size:12px;transition:background .2s}
 .toolbar button:hover{background:#3a3a5a}
+.toolbar button.primary{background:#ff6b6b;color:#fff}
+.toolbar button.primary:hover{background:#e05555}
 .toolbar .spacer{flex:1}
 
+/* Main split layout */
 .main-split{flex:1;display:flex;overflow:hidden;min-height:0}
 @media(max-width:768px){.main-split{flex-direction:column}}
 
+/* Editor pane */
 .editor-pane{width:60%;display:flex;flex-direction:column;border-right:1px solid #2a2a4a;overflow:hidden}
 @media(max-width:768px){.editor-pane{width:100%;height:50%;border-right:none;border-bottom:1px solid #2a2a4a}}
 
@@ -39,18 +48,20 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Oxygen,Ubunt
 .pane-header button:hover{background:#2a2a4a;color:#eee}
 
 .editor-wrap{flex:1;display:flex;position:relative;overflow:hidden;min-height:0;background:#0d1117}
-.gutter{width:44px;background:#0d1117;color:#484f58;text-align:right;padding:10px 6px 10px 0;font-family:'Courier New',monospace;font-size:14px;line-height:1.5;overflow:hidden;user-select:none;flex-shrink:0;border-right:1px solid #1a1a2e;white-space:nowrap}
+.gutter{width:44px;background:#0d1117;color:#484f58;text-align:right;padding:10px 6px 10px 0;font-family:'JetBrains Mono','Fira Code','Cascadia Code',monospace;font-size:14px;line-height:1.5;overflow:hidden;user-select:none;flex-shrink:0;border-right:1px solid #1a1a2e;white-space:nowrap}
 .gutter div{padding-right:4px}
 .editor-textarea-wrap{flex:1;position:relative}
-.editor-textarea-wrap textarea{position:absolute;top:0;left:0;width:100%;height:100%;background:transparent;border:none;outline:none;resize:none;color:#eee;font-family:'Courier New',monospace;font-size:14px;line-height:1.5;padding:10px 12px;tab-size:2;white-space:pre;overflow-wrap:normal;overflow-x:auto;overflow-y:auto}
+.editor-textarea-wrap textarea{position:absolute;top:0;left:0;width:100%;height:100%;background:transparent;border:none;outline:none;resize:none;color:#eee;font-family:'JetBrains Mono','Fira Code','Cascadia Code',monospace;font-size:14px;line-height:1.5;padding:10px 12px;tab-size:4;-moz-tab-size:4;white-space:pre;overflow-wrap:normal;overflow-x:auto;overflow-y:auto}
 .editor-textarea-wrap textarea::placeholder{color:#484f58}
 
+/* Preview pane */
 .preview-pane{flex:1;display:flex;flex-direction:column;overflow:hidden}
 @media(max-width:768px){.preview-pane{width:100%;height:50%}}
 .preview-pane iframe{flex:1;width:100%;border:none;background:#fff}
 
-.chat-panel{background:#16213e;border-top:1px solid #2a2a4a;flex-shrink:0;max-height:200px;display:flex;flex-direction:column;transition:max-height .3s}
-.chat-panel.collapsed{max-height:34px}
+/* Chat panel */
+.chat-panel{background:#16213e;border-top:1px solid #2a2a4a;flex-shrink:0;max-height:220px;display:flex;flex-direction:column;transition:max-height .3s}
+.chat-panel.collapsed{max-height:36px}
 .chat-header{display:flex;align-items:center;gap:8px;padding:6px 12px;cursor:pointer;border-bottom:1px solid #2a2a4a;flex-shrink:0}
 .chat-header span{font-size:12px;font-weight:600;color:#aaa}
 .chat-header .chat-toggle{font-size:10px;color:#666;margin-left:auto;transition:transform .3s}
@@ -61,14 +72,17 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Oxygen,Ubunt
 .chat-messages .msg .sender{color:#ff6b6b;font-weight:600;font-size:11px}
 .chat-messages .msg .time{color:#666;font-size:10px;margin-left:4px}
 .chat-messages .msg .text{color:#ccc}
+.chat-messages .typing-indicator{color:#888;font-size:11px;font-style:italic;padding:2px 0}
 .chat-input-row{display:flex;align-items:center;gap:4px;padding:4px 8px;border-top:1px solid #2a2a4a;flex-shrink:0}
 .chat-input-row input{flex:1;background:#0d1117;border:1px solid #2a2a4a;border-radius:4px;color:#eee;padding:6px 8px;font-size:13px;outline:none}
 .chat-input-row input:focus{border-color:#ff6b6b}
 .chat-input-row .emoji-btn{background:transparent;border:none;color:#aaa;cursor:pointer;font-size:16px;padding:2px 4px;border-radius:3px;line-height:1}
+.chat-input-row .emoji-btn:hover{background:#2a2a4a}
 .emoji-picker{display:flex;gap:2px;padding:4px 8px;border-top:1px solid #2a2a4a;flex-shrink:0;flex-wrap:wrap}
 .emoji-picker button{background:transparent;border:none;font-size:18px;cursor:pointer;padding:2px 5px;border-radius:3px;line-height:1}
 .emoji-picker button:hover{background:#2a2a4a}
 
+/* Share modal */
 .modal-overlay{position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.7);display:flex;align-items:center;justify-content:center;z-index:1000}
 .modal{background:#16213e;border:1px solid #2a2a4a;border-radius:12px;padding:24px;max-width:360px;width:90%;text-align:center}
 .modal h3{color:#eee;margin-bottom:12px;font-size:16px}
@@ -79,6 +93,11 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Oxygen,Ubunt
 .modal button:hover{background:#e05555}
 .modal button.secondary{background:#2a2a4a;color:#eee}
 .modal button.secondary:hover{background:#3a3a5a}
+
+/* Overlay for first-time share */
+.welcome-overlay{position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);z-index:998;display:none}
+
+/* Scrollbar */
 ::-webkit-scrollbar{width:6px;height:6px}
 ::-webkit-scrollbar-track{background:transparent}
 ::-webkit-scrollbar-thumb{background:#2a2a4a;border-radius:3px}
@@ -87,25 +106,29 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Oxygen,Ubunt
 </head>
 <body>
 
+<!-- Toolbar -->
 <div class="toolbar">
-  <div class="logo">⚡ CS</div>
+  <div class="logo">⚡ CC</div>
   <div class="sep"></div>
-  <div class="status disconnected" id="statusBadge">Starting...</div>
+  <div class="status disconnected" id="statusBadge">Connecting...</div>
   <div class="sep"></div>
-  <div class="room-info">Room: <strong id="roomDisplay">—</strong></div>
+  <div class="room-info" id="roomInfo">Room: <strong id="roomDisplay">—</strong></div>
+  <span class="badge peer hidden" id="roleBadge">Peer</span>
   <div class="user-count" id="userCount"></div>
   <div class="spacer"></div>
   <button onclick="shareRoom()">📋 Share</button>
   <button onclick="refreshPreview()">🔄 Refresh</button>
 </div>
 
+<!-- Main Split -->
 <div class="main-split">
+  <!-- Editor -->
   <div class="editor-pane">
     <div class="pane-header">
       <span class="pane-title">✏️ HTML</span>
       <div class="pane-actions">
-        <button onclick="clearCode()">Clear</button>
-        <button onclick="resetCode()">Reset</button>
+        <button onclick="clearEditor()">Clear</button>
+        <button onclick="resetDefault()">Reset</button>
       </div>
     </div>
     <div class="editor-wrap">
@@ -115,6 +138,8 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Oxygen,Ubunt
       </div>
     </div>
   </div>
+
+  <!-- Preview -->
   <div class="preview-pane">
     <div class="pane-header">
       <span class="pane-title">🔍 Preview</span>
@@ -126,6 +151,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Oxygen,Ubunt
   </div>
 </div>
 
+<!-- Chat Panel -->
 <div class="chat-panel" id="chatPanel">
   <div class="chat-header" onclick="toggleChat()">
     <span>💬 Chat</span>
@@ -133,7 +159,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Oxygen,Ubunt
     <span class="chat-toggle">▼</span>
   </div>
   <div class="chat-body">
-    <div class="chat-messages" id="chatMessages"><div class="msg" style="color:#888;font-size:12px">Connected. Share the link to code together.</div></div>
+    <div class="chat-messages" id="chatMessages"><div class="msg" style="color:#888;font-size:12px">Connect to share. Anyone with the link joins your room.</div></div>
     <div class="chat-input-row">
       <button class="emoji-btn" onclick="toggleEmojiPicker()">😊</button>
       <input type="text" id="chatInput" placeholder="Type a message..." onkeydown="onChatKey(event)">
@@ -150,10 +176,11 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Oxygen,Ubunt
   </div>
 </div>
 
+<!-- Share Modal -->
 <div class="modal-overlay hidden" id="shareModal">
   <div class="modal">
     <h3>🔗 Share Room</h3>
-    <p style="font-size:11px;color:#888">Send this link — anyone who opens it joins your room.</p>
+    <p style="font-size:11px;color:#888">Send this link — anyone who opens it joins your room automatically.</p>
     <p id="shareLink">Loading...</p>
     <div class="qr-wrap" id="qrcode"></div>
     <button onclick="copyShareLink()">📋 Copy Link</button>
@@ -162,177 +189,461 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Oxygen,Ubunt
 </div>
 
 <script>
-const DEFAULT = '<!DOCTYPE html>\n<html>\n<head>\n  <title>Live Code</title>\n  <style>\n    body { font-family: sans-serif; padding: 2rem; background: #1a1a2e; color: #eee; }\n  </style>\n</head>\n<body>\n  <h1>Hello!</h1>\n  <p>Start editing...</p>\n</body>\n</html>';
+// ====== STATE ======
+const DEFAULT_HTML = `<!DOCTYPE html>
+<html>
+<head>
+  <title>Collab Code</title>
+  <style>
+    body { font-family: sans-serif; padding: 2rem; background: #1a1a2e; color: #eee; }
+  </style>
+</head>
+<body>
+  <h1>Hello, world!</h1>
+  <p>Start editing...</p>
+</body>
+</html>`;
 
-let currentCode = DEFAULT;
-let peer = null, conn = null;
-let roomId = '', userId = '';
+let currentCode = DEFAULT_HTML;
+let socket = null;
+let roomId = '';
+let roomKey = '';
+let isHost = false;
+let userId = '';
+let users = [];
 let chatMessages = [];
-let codeSendTimer = null, previewTimer = null;
-let emojiPickerVisible = false, isHost = false, firstLoad = true;
+let codeSendTimer = null;
+let previewTimer = null;
+let isTyping = false;
+let typingTimeout = null;
+let emojiPickerVisible = false;
+let connected = false;
+let firstLoad = true;
 
-// ====== PEERJS SETUP ======
-function startPeer() {
-  roomId = location.hash ? location.hash.slice(1) : '';
-  if (!roomId) {
-    roomId = Math.random().toString(36).slice(2,10)+'-'+Math.random().toString(36).slice(2,6);
-    location.hash = roomId;
+// ====== CRYPTO ======
+async function getKeyFromPass(pass) {
+  const enc = new TextEncoder();
+  const hash = await crypto.subtle.digest('SHA-256', enc.encode(pass));
+  const jwk = {
+    kty: 'oct',
+    k: btoa(String.fromCharCode(...new Uint8Array(hash.slice(0,16)))).replace(/=+$/, '').replace(/\+/g,'-').replace(/\//g,'_'),
+    alg: 'A128GCM',
+    ext: true,
+  };
+  return crypto.subtle.importKey('jwk', jwk, { name: 'AES-GCM' }, false, ['encrypt','decrypt']);
+}
+
+async function encryptData(key, data) {
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const encoded = new TextEncoder().encode(JSON.stringify(data));
+  const encrypted = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, encoded);
+  const buf = new Uint8Array(encrypted);
+  return { buf, iv };
+}
+
+async function decryptData(key, buf, iv) {
+  try {
+    const decrypted = await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, key, buf);
+    return JSON.parse(new TextDecoder().decode(decrypted));
+  } catch(e) {
+    console.warn('Decrypt failed:', e);
+    return null;
   }
-  document.getElementById('roomDisplay').textContent = roomId;
+}
 
-  peer = new Peer(undefined, { debug: 0 });
-  peer.on('open', (id) => {
-    userId = id;
-    document.getElementById('statusBadge').className = 'status connected';
-    document.getElementById('statusBadge').textContent = 'Ready';
+// ====== SOCKET ======
+function connectToRoom(rId, rKey) {
+  roomId = rId;
+  roomKey = rKey;
 
-    if (roomId !== id) {
-      isHost = false;
-      conn = peer.connect(roomId, { reliable: true });
-      conn.on('open', () => {
-        document.getElementById('statusBadge').textContent = 'Connected';
-        conn.on('data', handleData);
-        conn.on('close', () => setStatus('Disconnected'));
-      });
-    } else {
-      isHost = true;
+  // Generate stable user ID from room key
+  userId = roomKey.slice(0,6) + '_' + Math.random().toString(36).slice(2,6);
+
+  document.getElementById('roomDisplay').textContent = roomId.slice(0,12) + '...';
+  setStatus('connecting', 'Connecting...');
+
+  socket = io('wss://oss-collab.excalidraw.com', {
+    transports: ['websocket', 'polling'],
+    forceNew: true,
+  });
+
+  socket.on('connect', () => {
+    connected = true;
+    setStatus('connected', 'Connected');
+    socket.emit('join-room', roomId);
+  });
+
+  socket.on('disconnect', () => {
+    connected = false;
+    setStatus('disconnected', 'Disconnected');
+    users = [];
+    updateUserCount();
+  });
+
+  socket.on('connect_error', (err) => {
+    setStatus('disconnected', 'Error: ' + err.message);
+  });
+
+  socket.on('init-room', (data) => {
+    // Host/peer determination
+    isHost = (data === 'first-in-room');
+    document.getElementById('roleBadge').textContent = isHost ? 'Host' : 'Peer';
+    document.getElementById('roleBadge').classList.remove('hidden');
+
+    if (isHost) {
       updateCodeEditor(currentCode);
       updatePreview();
-      document.getElementById('statusBadge').textContent = 'Hosting';
-      if (firstLoad) { firstLoad = false; setTimeout(shareRoom, 800); }
+      // Show share modal on first load
+      if (firstLoad) {
+        firstLoad = false;
+        setTimeout(shareRoom, 800);
+      }
+    } else {
+      sendData({ type: 'sync-request' });
     }
   });
 
-  peer.on('connection', (incoming) => {
-    conn = incoming;
-    conn.on('open', () => {
-      document.getElementById('statusBadge').textContent = 'Connected';
-      if (isHost) sendFullSync();
-      conn.on('data', handleData);
-      conn.on('close', () => setStatus('Connected'));
-    });
+  socket.on('first-in-room', () => {
+    if (!isHost) {
+      isHost = true;
+      document.getElementById('roleBadge').textContent = 'Host';
+    }
   });
-  peer.on('error', (err) => {
-    document.getElementById('statusBadge').className = 'status error';
-    document.getElementById('statusBadge').textContent = 'Error: ' + err.type;
+
+  socket.on('new-user', () => {
+    if (isHost) {
+      sendFullSync();
+    }
+  });
+
+  socket.on('room-user-change', (userList) => {
+    users = userList || [];
+    updateUserCount();
+  });
+
+  socket.on('client-broadcast', async (encryptedBuffer, iv) => {
+    try {
+      const key = await getKeyFromPass(roomKey);
+      const data = await decryptData(key, new Uint8Array(encryptedBuffer), new Uint8Array(iv));
+      if (!data) return;
+      handleIncomingData(data);
+    } catch(e) {
+      console.warn('Error handling broadcast:', e);
+    }
   });
 }
 
-function setStatus(t) {
-  document.getElementById('statusBadge').textContent = t;
+async function sendData(data) {
+  if (!socket || !connected) return;
+  try {
+    const key = await getKeyFromPass(roomKey);
+    const { buf, iv } = await encryptData(key, data);
+    socket.emit('server-volatile-broadcast', roomId, buf.buffer, iv.buffer);
+  } catch(e) {
+    console.warn('Send error:', e);
+  }
 }
 
-function handleData(data) {
+// ====== HANDLE INCOMING ======
+function handleIncomingData(data) {
   switch(data.type) {
     case 'code':
-      currentCode = data.html;
-      updateCodeEditor(currentCode);
-      clearTimeout(previewTimer);
-      previewTimer = setTimeout(updatePreview, 500);
+      if (!isHost && data.data && data.data.html !== undefined) {
+        currentCode = data.data.html;
+        updateCodeEditor(currentCode);
+        clearTimeout(previewTimer);
+        previewTimer = setTimeout(updatePreview, 500);
+      }
       break;
     case 'chat':
-      if (data.msg) { chatMessages.push(data.msg); renderChat(); }
+      if (data.data) {
+        chatMessages.push(data.data);
+        renderChat();
+      }
       break;
-    case 'sync-all':
-      if (data.html) { currentCode = data.html; updateCodeEditor(currentCode); updatePreview(); }
-      if (data.msgs) { chatMessages = data.msgs; renderChat(); }
+    case 'typing':
+      if (data.data && data.data.sender) {
+        showTypingIndicator(data.data.sender);
+      }
       break;
     case 'sync-request':
-      if (isHost) sendFullSync();
+      if (isHost) {
+        sendFullSync();
+      }
+      break;
+    case 'sync-all':
+      if (data.data) {
+        if (data.data.html) {
+          currentCode = data.data.html;
+          updateCodeEditor(currentCode);
+          updatePreview();
+        }
+        if (data.data.chatMessages) {
+          chatMessages = data.data.chatMessages;
+          renderChat();
+        }
+      }
+      break;
+    case 'users':
+      if (data.data && Array.isArray(data.data.users)) {
+        users = data.data.users;
+        updateUserCount();
+      }
       break;
   }
 }
 
-function sendData(data) { if (conn && conn.open) conn.send(data); }
-function sendFullSync() { sendData({ type: 'sync-all', html: currentCode, msgs: chatMessages }); }
+async function sendFullSync() {
+  sendData({
+    type: 'sync-all',
+    data: {
+      html: currentCode,
+      chatMessages: chatMessages,
+    }
+  });
+}
 
-// ====== EDITOR ======
+// ====== CODE EDITOR ======
 const editor = document.getElementById('codeEditor');
 const gutter = document.getElementById('gutter');
 
 function updateCodeEditor(code) {
   editor.value = code;
-  let h = '', lines = (code.match(/\n/g)||[]).length+1;
-  for (let i=1;i<=lines;i++) h += '<div>'+i+'</div>';
-  gutter.innerHTML = h;
+  updateLineNumbers();
+}
+
+function updateLineNumbers() {
+  const lines = editor.value.split('\n').length;
+  let html = '';
+  for (let i = 1; i <= lines; i++) {
+    html += '<div>' + i + '</div>';
+  }
+  gutter.innerHTML = html;
 }
 
 function onCodeChange() {
   currentCode = editor.value;
-  let lines = (currentCode.match(/\n/g)||[]).length+1, h='';
-  for (let i=1;i<=lines;i++) h += '<div>'+i+'</div>';
-  gutter.innerHTML = h;
+  updateLineNumbers();
 
   clearTimeout(previewTimer);
   previewTimer = setTimeout(updatePreview, 500);
+
   clearTimeout(codeSendTimer);
-  codeSendTimer = setTimeout(() => sendData({ type: 'code', html: currentCode }), 300);
+  codeSendTimer = setTimeout(() => {
+    sendData({
+      type: 'code',
+      data: { html: currentCode, sender: userId }
+    });
+  }, 300);
 }
 
 function handleTab(e) {
   if (e.key === 'Tab') {
     e.preventDefault();
-    const s=editor.selectionStart, en=editor.selectionEnd;
-    editor.value = editor.value.substring(0,s)+'  '+editor.value.substring(en);
-    editor.selectionStart=editor.selectionEnd=s+2;
+    const start = editor.selectionStart;
+    const end = editor.selectionEnd;
+    editor.value = editor.value.substring(0, start) + '    ' + editor.value.substring(end);
+    editor.selectionStart = editor.selectionEnd = start + 4;
     onCodeChange();
   }
 }
 
-function clearCode() { editor.value=''; currentCode=''; updatePreview(); sendData({type:'code',html:''}); }
-function resetCode() { currentCode=DEFAULT; updateCodeEditor(currentCode); updatePreview(); sendData({type:'code',html:currentCode}); }
+function clearEditor() {
+  editor.value = '';
+  currentCode = '';
+  updateLineNumbers();
+  updatePreview();
+  sendData({ type: 'code', data: { html: '', sender: userId } });
+}
+
+function resetDefault() {
+  currentCode = DEFAULT_HTML;
+  updateCodeEditor(currentCode);
+  updatePreview();
+  sendData({ type: 'code', data: { html: currentCode, sender: userId } });
+}
 
 // ====== PREVIEW ======
-function updatePreview() {
-  const d = document.getElementById('preview').contentDocument || document.getElementById('preview').contentWindow.document;
-  d.open(); d.write(currentCode); d.close();
+function updatePreview(replaceDoc) {
+  const iframe = document.getElementById('preview');
+  const doc = iframe.contentDocument || iframe.contentWindow.document;
+  doc.open();
+  doc.write(currentCode);
+  doc.close();
 }
-function refreshPreview() { updatePreview(); }
+
+function refreshPreview() {
+  updatePreview();
+}
 
 // ====== CHAT ======
 function renderChat() {
-  const c = document.getElementById('chatMessages');
-  let h = '';
-  for (const m of chatMessages) {
-    const t = m.t ? new Date(m.t).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}) : '';
-    const s = m.s ? m.s.slice(0,4) : '???';
-    h += '<div class="msg"><span class="sender">'+esc(s)+'</span><span class="time">'+t+'</span><br><span class="text">'+esc(m.text)+'</span></div>';
+  const container = document.getElementById('chatMessages');
+  let html = '';
+  for (const msg of chatMessages) {
+    const time = msg.timestamp ? new Date(msg.timestamp).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}) : '';
+    const sender = msg.sender ? msg.sender.slice(0,4) : '???';
+    html += '<div class="msg"><span class="sender">' + escHtml(sender) + '</span><span class="time">' + time + '</span><br><span class="text">' + escHtml(msg.text) + '</span></div>';
   }
-  c.innerHTML = h; c.scrollTop = c.scrollHeight;
+  if (typingIndicator) {
+    html += '<div class="typing-indicator">' + escHtml(typingIndicator) + ' is typing...</div>';
+  }
+  container.innerHTML = html;
+  container.scrollTop = container.scrollHeight;
 }
-function onChatKey(e) { if(e.key==='Enter'){e.preventDefault();sendChat();} }
+
+let typingIndicator = null;
+
+function onChatKey(e) {
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    sendChat();
+  }
+}
+
 function sendChat() {
-  const i = document.getElementById('chatInput');
-  const t = i.value.trim(); if(!t)return;
-  i.value='';
-  const m = {s:userId,text:t,t:Date.now()};
-  chatMessages.push(m); renderChat();
-  sendData({type:'chat',msg:m});
-  if(emojiPickerVisible)toggleEmojiPicker();
+  const input = document.getElementById('chatInput');
+  const text = input.value.trim();
+  if (!text) return;
+  input.value = '';
+  const msg = { sender: userId, text, timestamp: Date.now() };
+  chatMessages.push(msg);
+  renderChat();
+  sendData({ type: 'chat', data: msg });
+  if (emojiPickerVisible) toggleEmojiPicker();
 }
-function sendEmoji(e) { document.getElementById('chatInput').value=e; sendChat(); }
-function toggleEmojiPicker() { const ep=document.getElementById('emojiPicker'); emojiPickerVisible=!emojiPickerVisible; ep.classList.toggle('hidden',!emojiPickerVisible); }
-function toggleChat() { document.getElementById('chatPanel').classList.toggle('collapsed'); }
-function esc(s) { const d=document.createElement('div'); d.textContent=s; return d.innerHTML; }
+
+function sendEmoji(emoji) {
+  const input = document.getElementById('chatInput');
+  input.value = emoji;
+  sendChat();
+}
+
+function toggleEmojiPicker() {
+  const ep = document.getElementById('emojiPicker');
+  emojiPickerVisible = !emojiPickerVisible;
+  ep.classList.toggle('hidden', !emojiPickerVisible);
+}
+
+function toggleChat() {
+  document.getElementById('chatPanel').classList.toggle('collapsed');
+}
+
+function showTypingIndicator(sender) {
+  typingIndicator = sender.slice(0,4);
+  renderChat();
+  clearTimeout(typingTimeout);
+  typingTimeout = setTimeout(() => {
+    typingIndicator = null;
+    renderChat();
+  }, 2000);
+}
+
+// ====== UI HELPERS ======
+function escHtml(s) {
+  const div = document.createElement('div');
+  div.textContent = s;
+  return div.innerHTML;
+}
+
+function setStatus(cls, text) {
+  const badge = document.getElementById('statusBadge');
+  badge.className = 'status ' + cls;
+  badge.textContent = text;
+}
+
+function updateUserCount() {
+  const el = document.getElementById('userCount');
+  const count = users.length > 0 ? users.length + (isHost ? '' : '+') : '';
+  el.textContent = count ? '👤 ' + count : '';
+  document.getElementById('chatUserCount').textContent = count ? '(' + count + ')' : '';
+}
+
+// ====== ROOM CREATION ======
+function createRoom() {
+  const randomId = crypto.randomUUID ? crypto.randomUUID().slice(0,13) : Math.random().toString(36).slice(2,15);
+  const randomKey = crypto.randomUUID ? crypto.randomUUID().slice(0,10) : Math.random().toString(36).slice(2,12);
+  const hash = '#room=' + randomId + ',' + randomKey;
+  window.location.hash = hash;
+  connectToRoom(randomId, randomKey);
+}
+
+function parseHashAndConnect(hash) {
+  const match = hash.match(/#room=([^,]+),(\S+)/);
+  if (match) {
+    connectToRoom(match[1], match[2]);
+    return true;
+  }
+  return false;
+}
 
 // ====== SHARE ======
 function shareRoom() {
-  const m=document.getElementById('shareModal'); m.classList.remove('hidden');
-  const u = location.href.split('#')[0]+'#'+roomId;
-  document.getElementById('shareLink').textContent = u;
-  const q=document.getElementById('qrcode'); q.innerHTML='';
-  new QRCode(q,{text:u,width:180,height:180,colorDark:'#1a1a2e',colorLight:'#ffffff',correctLevel:QRCode.CorrectLevel.H});
+  const modal = document.getElementById('shareModal');
+  modal.classList.remove('hidden');
+  const shareUrl = window.location.href;
+  document.getElementById('shareLink').textContent = shareUrl;
+
+  const qrContainer = document.getElementById('qrcode');
+  qrContainer.innerHTML = '';
+  new QRCode(qrContainer, {
+    text: shareUrl,
+    width: 180,
+    height: 180,
+    colorDark: '#1a1a2e',
+    colorLight: '#ffffff',
+    correctLevel: QRCode.CorrectLevel.H,
+  });
 }
-function closeShareModal() { document.getElementById('shareModal').classList.add('hidden'); }
+
+function closeShareModal() {
+  document.getElementById('shareModal').classList.add('hidden');
+}
+
 function copyShareLink() {
-  const l=document.getElementById('shareLink').textContent;
-  navigator.clipboard.writeText(l).then(()=>alert('Link copied!')).catch(()=>{const t=document.createElement('textarea');t.value=l;document.body.appendChild(t);t.select();document.execCommand('copy');document.body.removeChild(t);alert('Link copied!');});
+  const link = document.getElementById('shareLink').textContent;
+  navigator.clipboard.writeText(link).then(() => {
+    alert('Link copied!');
+  }).catch(() => {
+    const ta = document.createElement('textarea');
+    ta.value = link;
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand('copy');
+    document.body.removeChild(ta);
+    alert('Link copied!');
+  });
 }
 
 // ====== INIT ======
-updateCodeEditor(currentCode);
-updatePreview();
-startPeer();
+function init() {
+  const hash = window.location.hash;
+  
+  if (hash && hash.includes('#room=')) {
+    parseHashAndConnect(hash);
+  } else {
+    // AUTO-CREATE ROOM — no clicking needed
+    createRoom();
+  }
+
+  updateCodeEditor(currentCode);
+  updatePreview();
+}
+
+window.addEventListener('hashchange', () => {
+  const hash = window.location.hash;
+  if (hash && hash.includes('#room=')) {
+    parseHashAndConnect(hash);
+  }
+});
+
+document.addEventListener('click', (e) => {
+  if (emojiPickerVisible && !e.target.closest('#emojiPicker') && !e.target.closest('.emoji-btn')) {
+    toggleEmojiPicker();
+  }
+});
+
+init();
 </script>
 </body>
 </html>
