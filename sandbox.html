@@ -308,6 +308,7 @@
   const charCount    = document.getElementById('charCount');
 
   let debounceTimer  = null;
+  let isExternalUpdate = false;
 
   // ── Room ID from URL hash ──
   function parseRoomId() {
@@ -345,14 +346,17 @@
   // ── Listen for code updates from collab ──
   window.addEventListener('message', function onMessage(event) {
     if (event.data?.type === 'CODE_UPDATE') {
+      isExternalUpdate = true;
       editor.value = event.data.code;
       updatePreview();
       updateCharCount();
+      isExternalUpdate = false;
     }
   });
 
   // ── When user types, send code to parent ──
   editor.addEventListener('input', function onInput() {
+    if (isExternalUpdate) return;
     if (window.opener) {
       window.opener.postMessage({ type: 'CODE_FROM_SANDBOX', code: editor.value }, '*');
     }
