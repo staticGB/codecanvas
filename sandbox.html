@@ -305,10 +305,23 @@
   </div>
 </div>
 
-<script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
 <script>
-(function() {
+(async function() {
   'use strict';
+
+  // ── Dynamically load socket.io ──
+  let io;
+  try {
+    const script = document.createElement('script');
+    script.src = 'https://cdn.socket.io/4.7.2/socket.io.min.js';
+    document.head.appendChild(script);
+    await new Promise((resolve, reject) => {
+      script.onload = resolve;
+      script.onerror = reject;
+    });
+  } catch (e) {
+    console.warn('Socket.IO CDN failed to load:', e);
+  }
 
   const DEFAULT_CODE = `<!DOCTYPE html>
 <html>
