@@ -4,6 +4,7 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Code Sandbox</title>
+<script src="https://cdn.socket.io/4.7.2/socket.io.min.js" defer></script>
 <style>
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -306,22 +307,8 @@
 </div>
 
 <script>
-(async function() {
+(function() {
   'use strict';
-
-  // ── Dynamically load socket.io ──
-  let io;
-  try {
-    const script = document.createElement('script');
-    script.src = 'https://cdn.socket.io/4.7.2/socket.io.min.js';
-    document.head.appendChild(script);
-    await new Promise((resolve, reject) => {
-      script.onload = resolve;
-      script.onerror = reject;
-    });
-  } catch (e) {
-    console.warn('Socket.IO CDN failed to load:', e);
-  }
 
   const DEFAULT_CODE = `<!DOCTYPE html>
 <html>
@@ -338,7 +325,7 @@
 
   const RELAY_SERVER = 'https://oss-collab.excalidraw.com';
 
-  // ── DOM refs ──
+  // ── DOM refs (synchronous — always works) ──
   const editor       = document.getElementById('editor');
   const preview      = document.getElementById('preview');
   const runBtn       = document.getElementById('runBtn');
@@ -367,7 +354,7 @@
     } else if (state === 'connecting') {
       headerDot.classList.add('connecting');
       statusDot.classList.add('connecting');
-      statusText.textContent = 'Connecting…';
+      statusText.textContent = 'Connecting\u2026';
     } else {
       headerDot.classList.add('disconnected');
       statusDot.classList.add('disconnected');
@@ -411,54 +398,6 @@
     const key = await importRoomKey(keyStr);
     const decrypted = await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, key, data);
     return new Uint8Array(decrypted);
-  }
-
-  // ── Socket connection (standalone mode) ──
-
-  function connectSocket(roomId, roomKeyStr) {
-    const url = RELAY_SERVER;
-    statusText.textContent = 'Connecting to relay…';
-    setConnectionState('connecting');
-
-    socket = io(url, {
-      transports: ['websocket', 'polling'],
-    });
-
-    socket.on('connect', () => {
-      setConnectionState('connected');
-      statusText.textContent = 'Connected — joined room';
-      socket.emit('join-room', roomId, roomKeyStr);
-    });
-
-    socket.on('disconnect', (reason) => {
-      setConnectionState('disconnected');
-      statusText.textContent = 'Disconnected: ' + reason;
-    });
-
-    socket.on('connect_error', (err) => {
-      setConnectionState('disconnected');
-      statusText.textContent = 'Connection error: ' + err.message;
-    });
-
-    // Receive encrypted broadcasts from other clients
-    socket.on('client-broadcast', async (encryptedData, iv) => {
-      try {
-        const decrypted = await decryptData(roomKeyStr, new Uint8Array(iv), encryptedData);
-        const data = JSON.parse(new TextDecoder().decode(decrypted));
-        if (data.type === 'CODE_UPDATE') {
-          isExternalUpdate = true;
-          editor.value = data.payload.code;
-          updatePreview();
-          updateCharCount();
-          isExternalUpdate = false;
-        }
-      } catch (err) {
-        console.error('Failed to decrypt/parse broadcast:', err);
-      }
-    });
-
-    // Update badge
-    roomBadge.textContent = 'room: ' + roomId;
   }
 
   // ── Send code via available channel ──
@@ -561,20 +500,18 @@
     sendCode(DEFAULT_CODE);
   });
 
-  // ── Init ──
+  // ── Init (synchronous — page renders immediately) ──
   editor.value = DEFAULT_CODE;
   updatePreview();
   updateCharCount();
 
-  // ── Determine mode and connect if standalone ──
-
+  // ── Determine mode ──
   if (!window.opener && roomInfo && roomInfo.roomId && roomInfo.roomKey) {
     // Standalone mode: connect directly to relay
     roomKey = roomInfo.roomKey;
     roomBadge.textContent = 'room: ' + roomInfo.roomId;
-    statusText.textContent = 'Connecting to relay…';
+    statusText.textContent = 'Connecting to relay\u2026';
     setConnectionState('connecting');
-    connectSocket(roomInfo.roomId, roomInfo.roomKey);
   } else if (!window.opener && roomInfo && roomInfo.roomId && !roomInfo.roomKey) {
     // URL has room but no key — show badge but don't connect
     roomBadge.textContent = 'room: ' + roomInfo.roomId + ' (no key)';
@@ -582,6 +519,85 @@
     // Local mode: no opener, no room — just a local editor
     statusText.textContent = 'Local mode';
     setConnectionState('disconnected');
+  }
+
+  // ── Socket connection (async — waits for io to be available) ──
+
+  function connectSocket() {
+    const roomId = roomInfo.roomId;
+    const roomKeyStr = roomInfo.roomKey;
+    if (!roomId || !roomKeyStr) {
+      console.warn('No room info available, cannot connect socket');
+      return;
+    }
+
+    const url = RELAY_SERVER;
+    statusText.textContent = 'Connecting to relay\u2026';
+    setConnectionState('connecting');
+
+    socket = io(url, {
+      transports: ['websocket', 'polling'],
+    });
+
+    socket.on('connect', () => {
+      setConnectionState('connected');
+      statusText.textContent = 'Connected \u2014 joined room';
+      socket.emit('join-room', roomId, roomKeyStr);
+    });
+
+    socket.on('disconnect', (reason) => {
+      setConnectionState('disconnected');
+      statusText.textContent = 'Disconnected: ' + reason;
+    });
+
+    socket.on('connect_error', (err) => {
+      setConnectionState('disconnected');
+      statusText.textContent = 'Connection error: ' + err.message;
+    });
+
+    // Receive encrypted broadcasts from other clients
+    socket.on('client-broadcast', async (encryptedData, iv) => {
+      try {
+        const decrypted = await decryptData(roomKeyStr, new Uint8Array(iv), encryptedData);
+        const data = JSON.parse(new TextDecoder().decode(decrypted));
+        if (data.type === 'CODE_UPDATE') {
+          isExternalUpdate = true;
+          editor.value = data.payload.code;
+          updatePreview();
+          updateCharCount();
+          isExternalUpdate = false;
+        }
+      } catch (err) {
+        console.error('Failed to decrypt/parse broadcast:', err);
+      }
+    });
+
+    // Update badge
+    roomBadge.textContent = 'room: ' + roomId;
+  }
+
+  // ── Try to connect socket (async, retries if io not ready yet) ──
+  function tryConnect() {
+    if (typeof io !== 'undefined') {
+      // io is available — connect now
+      connectSocket();
+      return;
+    }
+    // io not loaded yet — retry in 500ms
+    setTimeout(tryConnect, 500);
+  }
+
+  // Determine if we should try connecting
+  if (!window.opener && roomInfo && roomInfo.roomId && roomInfo.roomKey) {
+    // Add dynamic script injection as a fallback in case defer tag failed
+    if (typeof io === 'undefined') {
+      const script = document.createElement('script');
+      script.src = 'https://cdn.socket.io/4.7.2/socket.io.min.js';
+      script.onload = tryConnect;
+      document.head.appendChild(script);
+    }
+    // Try connecting immediately (or wait for io to load via defer)
+    tryConnect();
   }
 
 })();
