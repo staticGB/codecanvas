@@ -425,25 +425,27 @@
       }
     }
     // Wire one global delegation listener on body (capture phase, survives React)
-    if (found && !greenDotDelegationWired) {
+    if (found) {
+      // Remove old listener if re-wiring
+      if (greenDotDelegationWired) {
+        document.body.removeEventListener("click", greenDotClickHandler, true);
+      }
       greenDotDelegationWired = true;
-      document.body.addEventListener(
-        "click",
-        (e) => {
-          // Check if the click landed on or inside the code canvas button
-          const target = e.target;
-          const btn = target.closest('button[aria-label="Code Canvas"]');
-          if (btn) {
-            e.preventDefault();
-            e.stopPropagation();
-            if (!panelEl) {
-              buildPanel();
-            }
-            panelEl.classList.toggle("cc-hidden");
-          }
-        },
-        true // capture phase — fires before React's synthetic events
-      );
+      document.body.addEventListener("click", greenDotClickHandler, true);
+    }
+  }
+
+  // Separate handler so we can remove/re-add it
+  function greenDotClickHandler(e) {
+    // Check if the click landed on or inside the code canvas button
+    const btn = e.target.closest('button[aria-label="Code Canvas"]');
+    if (btn) {
+      e.preventDefault();
+      e.stopPropagation();
+      if (!panelEl) {
+        buildPanel();
+      }
+      panelEl.classList.toggle("cc-hidden");
     }
   }
 
