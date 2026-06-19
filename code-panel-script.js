@@ -397,19 +397,15 @@
   }
 
   // ---- Boot -----------------------------------------------------------------
-  // Excalidraw's React SPA re-renders its DOM and can wipe injected elements.
-  // We use a MutationObserver that keeps re-injecting the toggle button
-  // whenever it disappears, and only builds the panel once.
-  function init() {
+  // Excalidraw's React SPA aggressively re-renders its DOM, especially when
+  // joining a room ("Loading scene…" phase). We use a resilient polling loop
+  // that re-injects the button any time it disappears, even across multiple
+  // React re-renders.
+  function ensureInject() {
     if (!document.getElementById("cc-toggle-launcher")) {
       createToggleButton();
     }
-  }
-
-  function ensureInject() {
-    init();
-    // If the panel was built but disappeared, just re-hide it — the
-    // toggle button will rebuild it on next click.
+    // If the panel was built but disappeared, reset so next click rebuilds it
     if (panelEl && !document.body.contains(panelEl)) {
       panelEl = null;
       editorEl = null;
@@ -422,13 +418,8 @@
   // Initial injection after DOM is ready
   function boot() {
     ensureInject();
-    // Keep watching the DOM — React may re-render and wipe our elements
-    const observer = new MutationObserver(() => {
-      if (!document.getElementById("cc-toggle-launcher") || (panelEl && !document.body.contains(panelEl))) {
-        ensureInject();
-      }
-    });
-    observer.observe(document.body, { childList: true, subtree: true });
+    // Poll every 500ms — survives React re-rendering DOM at any point
+    setInterval(ensureInject, 500);
   }
 
   if (document.readyState === "loading") {
