@@ -289,7 +289,8 @@
     btn.id = "cc-toggle-launcher";
     btn.type = "button";
     btn.title = "Toggle Code Canvas";
-    btn.innerHTML = '<span style="font-family:monospace">&lt;/&gt;</span> Code';
+    btn.innerHTML =
+      '<span style="font-family:monospace">&lt;/&gt;</span> Code <span style="font-size:9px;background:#333;color:#4ade80;padding:1px 5px;border-radius:4px;margin-left:3px">v4</span>';
     btn.addEventListener("click", () => {
       if (!panelEl) {
         buildPanel();
