@@ -399,38 +399,51 @@
   // ---- Fix the green dot in Excalidraw's own toolbar --------
   // The compiled bundle has a green dot that opens sandbox.html (now deleted).
   // We rename it, change its icon, and wire it to our panel instead.
+  // Uses event delegation so it survives React re-renders.
+  let greenDotDelegationWired = false;
+
   function fixGreenDot() {
-    // The green dot label has title "Open Code Sandbox"
-    const labels = document.querySelectorAll('label[title="Open Code Sandbox"]');
+    // Find the green dot label/button (original title or already-renamed)
+    const labels = document.querySelectorAll(
+      'label[title="Open Code Sandbox"], label[title="Code Canvas"]'
+    );
+    let found = false;
     for (const label of labels) {
-      // Change label text
+      found = true;
       label.title = "Code Canvas";
-      // Find the inner button
-      const btn = label.querySelector('button');
+      const btn = label.querySelector("button");
       if (btn) {
         btn.setAttribute("aria-label", "Code Canvas");
-        // Only wire once (polling runs this every 500ms)
-        if (!btn.dataset.codeCanvasWired) {
-          btn.dataset.codeCanvasWired = "true";
-          // Use capture phase to beat React's synthetic event delegation
-          btn.addEventListener("click", (e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            if (!panelEl) {
-              buildPanel();
-            }
-            panelEl.classList.toggle("cc-hidden");
-          }, true); // capture phase
-        }
-        // Replace the green circle with a </> icon
-        const svg = btn.querySelector('svg');
-        if (svg) {
+        // Replace the green circle with a </> icon (if not already done)
+        const svg = btn.querySelector("svg");
+        if (svg && !svg.innerHTML.includes("&lt;/&gt;")) {
           svg.innerHTML = `
             <text x="8" y="12" text-anchor="middle" font-size="10"
               font-family="monospace" font-weight="bold" fill="currentColor">&lt;/&gt;</text>
           `;
         }
       }
+    }
+    // Wire one global delegation listener on body (capture phase, survives React)
+    if (found && !greenDotDelegationWired) {
+      greenDotDelegationWired = true;
+      document.body.addEventListener(
+        "click",
+        (e) => {
+          // Check if the click landed on or inside the code canvas button
+          const target = e.target;
+          const btn = target.closest('button[aria-label="Code Canvas"]');
+          if (btn) {
+            e.preventDefault();
+            e.stopPropagation();
+            if (!panelEl) {
+              buildPanel();
+            }
+            panelEl.classList.toggle("cc-hidden");
+          }
+        },
+        true // capture phase — fires before React's synthetic events
+      );
     }
   }
 
