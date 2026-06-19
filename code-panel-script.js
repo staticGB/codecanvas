@@ -286,8 +286,9 @@
     btn.addEventListener("click", () => {
       if (!panelEl) {
         buildPanel();
+      } else {
+        panelEl.classList.toggle("cc-hidden");
       }
-      panelEl.classList.toggle("cc-hidden");
     });
     document.body.appendChild(btn);
   }
