@@ -396,6 +396,39 @@
     }
   }
 
+  // ---- Fix the green dot in Excalidraw's own toolbar --------
+  // The compiled bundle has a green dot that opens sandbox.html (now deleted).
+  // We rename it, change its icon, and wire it to our panel instead.
+  function fixGreenDot() {
+    // The green dot label has title "Open Code Sandbox"
+    const labels = document.querySelectorAll('label[title="Open Code Sandbox"]');
+    for (const label of labels) {
+      // Change label text
+      label.title = "Code Canvas";
+      // Find the inner button
+      const btn = label.querySelector('button');
+      if (btn) {
+        btn.setAttribute("aria-label", "Code Canvas");
+        btn.onclick = (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          if (!panelEl) {
+            buildPanel();
+          }
+          panelEl.classList.toggle("cc-hidden");
+        };
+        // Replace the green circle with a </> icon
+        const svg = btn.querySelector('svg');
+        if (svg) {
+          svg.innerHTML = `
+            <text x="8" y="12" text-anchor="middle" font-size="10"
+              font-family="monospace" font-weight="bold" fill="currentColor">&lt;/&gt;</text>
+          `;
+        }
+      }
+    }
+  }
+
   // ---- Boot -----------------------------------------------------------------
   // Excalidraw's React SPA aggressively re-renders its DOM, especially when
   // joining a room ("Loading scene…" phase). We use a resilient polling loop
@@ -405,6 +438,7 @@
     if (!document.getElementById("cc-toggle-launcher")) {
       createToggleButton();
     }
+    fixGreenDot();
     // If the panel was built but disappeared, reset so next click rebuilds it
     if (panelEl && !document.body.contains(panelEl)) {
       panelEl = null;
