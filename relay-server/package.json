@@ -1,0 +1,15 @@
+{
+  "name": "codecanvas-relay",
+  "version": "1.0.0",
+  "description": "Minimal WebSocket relay for syncing the CodeCanvas panel across an Excalidraw room",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  }
+}
