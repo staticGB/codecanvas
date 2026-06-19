@@ -49,13 +49,13 @@
         fiber.elementType?.displayName ||
         "";
 
-      // Check for ExcalidrawElementsContext — holds the elements array
+      // Check for ExcalidrawElementsContext — holds the elements accessor
       if (
         name === "ExcalidrawElementsContext" &&
         fiber.child?.memoizedProps?.value
       ) {
         const val = fiber.child.memoizedProps.value;
-        if (Array.isArray(val)) {
+        if (val && val.getElementsIncludingDeleted) {
           foundElements = val;
         }
       }
@@ -82,12 +82,12 @@
 
     if (foundAPI && foundElements) {
       excalidrawAPI = foundAPI;
-      // Wrap getElements to always read the latest from React's state
-      // (the elements array reference changes when elements are added/removed)
+      // Use the context's getElementsIncludingDeleted to read elements
+      // (the elements array reference changes on every update)
       getElements = () => {
-        // Re-walk to get latest elements reference
+        // Re-walk to get latest elements context reference
         const seen2 = new WeakSet();
-        let latest = null;
+        let elementsCtx = null;
         function walk2(f) {
           if (!f || seen2.has(f)) return;
           seen2.add(f);
@@ -95,11 +95,13 @@
             f.elementType?.name || f.elementType?.displayName || "";
           if (
             n === "ExcalidrawElementsContext" &&
-            f.child?.memoizedProps?.value &&
-            Array.isArray(f.child.memoizedProps.value)
+            f.child?.memoizedProps?.value
           ) {
-            latest = f.child.memoizedProps.value;
-            return; // found it
+            const val = f.child.memoizedProps.value;
+            if (val && val.getElementsIncludingDeleted) {
+              elementsCtx = val;
+              return;
+            }
           }
           let c = f.child;
           while (c) {
@@ -108,7 +110,12 @@
           }
         }
         walk2(root[containerKey]);
-        return latest || [];
+        if (elementsCtx) {
+          try {
+            return elementsCtx.getElementsIncludingDeleted();
+          } catch { return []; }
+        }
+        return [];
       };
       return true;
     }
