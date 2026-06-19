@@ -588,8 +588,11 @@
     if (btn) {
       e.preventDefault();
       e.stopPropagation();
-      if (!panelEl) buildPanel();
-      panelEl.classList.toggle("cc-hidden");
+      if (!panelEl) {
+        buildPanel();
+      } else {
+        panelEl.classList.toggle("cc-hidden");
+      }
     }
   }
 
