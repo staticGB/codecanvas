@@ -172,7 +172,7 @@
   }
 
   function updateCodeElement(code) {
-    if (!excalidrawAPI || !excalidrawAPI.ready) return;
+    if (!excalidrawAPI) return;
 
     const elements = getElements();
     if (!elements) return;
@@ -225,7 +225,7 @@
   }
 
   function pollForRemoteChanges() {
-    if (!excalidrawAPI || !getElements) return;
+    if (!getElements) return;
 
     // Don't overwrite while user is actively typing
     if (Date.now() - lastLocalEditAt < REMOTE_SUPPRESS_WINDOW_MS) return;
