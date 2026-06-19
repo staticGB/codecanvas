@@ -290,7 +290,7 @@
     btn.type = "button";
     btn.title = "Toggle Code Canvas";
     btn.innerHTML =
-      '<span style="font-family:monospace">&lt;/&gt;</span> Code <span style="font-size:9px;background:#333;color:#4ade80;padding:1px 5px;border-radius:4px;margin-left:3px">v4</span>';
+      '<span style="font-family:monospace">&lt;/&gt;</span> Code <span style="font-size:9px;background:#333;color:#4ade80;padding:1px 5px;border-radius:4px;margin-left:3px">v5</span>';
     btn.addEventListener("click", () => {
       if (!panelEl) {
         buildPanel();
@@ -401,9 +401,9 @@
     broadcastTimer = setTimeout(() => {
       runPreview();
       // Broadcast to Excalidraw's scene — their collaboration server syncs it
-      if (excalidrawAPI && excalidrawAPI.ready) {
-        updateCodeElement(currentCode);
-      }
+      // Note: no ready() guard — that guard was blocking writes and causing
+      // the poller to revert the editor to the old scene content
+      updateCodeElement(currentCode);
     }, 350);
   }
 
