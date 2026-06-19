@@ -409,14 +409,19 @@
       const btn = label.querySelector('button');
       if (btn) {
         btn.setAttribute("aria-label", "Code Canvas");
-        btn.onclick = (e) => {
-          e.preventDefault();
-          e.stopPropagation();
-          if (!panelEl) {
-            buildPanel();
-          }
-          panelEl.classList.toggle("cc-hidden");
-        };
+        // Only wire once (polling runs this every 500ms)
+        if (!btn.dataset.codeCanvasWired) {
+          btn.dataset.codeCanvasWired = "true";
+          // Use capture phase to beat React's synthetic event delegation
+          btn.addEventListener("click", (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            if (!panelEl) {
+              buildPanel();
+            }
+            panelEl.classList.toggle("cc-hidden");
+          }, true); // capture phase
+        }
         // Replace the green circle with a </> icon
         const svg = btn.querySelector('svg');
         if (svg) {
