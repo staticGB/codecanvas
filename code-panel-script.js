@@ -1,28 +1,256 @@
 // CodeCanvas panel for Excalidraw
-// A floating, draggable, resizable code editor + live preview that syncs
-// across everyone viewing the same Excalidraw room, via a small external
-// relay server (see relay-server/README.md). Falls back to local-only mode
-// (localStorage only, no cross-browser sync) if the relay isn't reachable.
+// Syncs code via Excalidraw's OWN collaboration socket — no relay server needed.
+// Stores code as a hidden text element in the scene, and Excalidraw's built-in
+// collaboration (room sync) carries it to every collaborator for free.
+//
+// NO DEPENDENCIES. NO RELAY SERVER. LIVES FOREVER ON GITHUB PAGES.
 (function () {
   "use strict";
-
-  // ---- Configuration ---------------------------------------------------
-  // Set this to your deployed relay's wss:// URL. See relay-server/README.md.
-  const RELAY_URL = "wss://proud-james-criteria-obviously.trycloudflare.com";
 
   const DEFAULT_CODE =
     "<!DOCTYPE html>\n<html>\n<head>\n  <title>Hello</title>\n  <style>\n    body { font-family: sans-serif; padding: 1rem; background: #f5f5f5; }\n    h1 { color: #333; }\n  </style>\n</head>\n<body>\n  <h1>Collab Code!</h1>\n  <p>Edit and everyone in this room sees it live.</p>\n  <script>\n    console.log('Hello from CodeCanvas');\n  <\/script>\n</body>\n</html>";
 
-  const BROADCAST_DEBOUNCE_MS = 350;
-  const REMOTE_SUPPRESS_WINDOW_MS = 1200; // ignore inbound updates this soon after local typing
-  const RECONNECT_BASE_DELAY_MS = 1000;
-  const RECONNECT_MAX_DELAY_MS = 15000;
+  const CODE_ELEMENT_ID = "__codecanvas__";
+  const POLL_INTERVAL_MS = 800;
+  const REMOTE_SUPPRESS_WINDOW_MS = 1200;
 
-  // ---- Room identity ------------------------------------------------------
-  // Excalidraw puts the room id + encryption key in the URL hash, e.g.
-  // #room=abc123,someKey. Every collaborator in the same room has the same
-  // hash, so we reuse it directly as our own relay's room key. If there's no
-  // hash, the user isn't in a shared room - panel still works, just local.
+  // ---- State ---------------------------------------------------------------
+  let excalidrawAPI = null;
+  let getElements = null;
+  let panelEl = null;
+  let editorEl = null;
+  let previewEl = null;
+  let statusEl = null;
+  let gutterEl = null;
+  let lastLocalEditAt = 0;
+  let knownCodeHash = 0;
+
+  // ---- Find Excalidraw's API via React fiber -------------------------------
+  function findExcalidrawAPI() {
+    const root = document.getElementById("root");
+    if (!root) return false;
+
+    // Find the React fiber/container key
+    const containerKey = Object.keys(root).find((k) =>
+      k.startsWith("__reactContainer$")
+    );
+    if (!containerKey) return false;
+
+    const seen = new WeakSet();
+    let foundAPI = null;
+    let foundElements = null;
+
+    function walk(fiber) {
+      if (!fiber || seen.has(fiber)) return;
+      seen.add(fiber);
+
+      const name =
+        fiber.elementType?.name ||
+        fiber.elementType?.displayName ||
+        "";
+
+      // Check for ExcalidrawElementsContext — holds the elements array
+      if (
+        name === "ExcalidrawElementsContext" &&
+        fiber.child?.memoizedProps?.value
+      ) {
+        const val = fiber.child.memoizedProps.value;
+        if (Array.isArray(val)) {
+          foundElements = val;
+        }
+      }
+
+      // Check for ExcalidrawAPIContext — holds updateScene and other methods
+      if (
+        name === "ExcalidrawAPIContext" &&
+        fiber.child?.memoizedProps?.value
+      ) {
+        const val = fiber.child.memoizedProps.value;
+        if (val && val.updateScene) {
+          foundAPI = val;
+        }
+      }
+
+      let child = fiber.child;
+      while (child) {
+        walk(child);
+        child = child.sibling;
+      }
+    }
+
+    walk(root[containerKey]);
+
+    if (foundAPI && foundElements) {
+      excalidrawAPI = foundAPI;
+      // Wrap getElements to always read the latest from React's state
+      // (the elements array reference changes when elements are added/removed)
+      getElements = () => {
+        // Re-walk to get latest elements reference
+        const seen2 = new WeakSet();
+        let latest = null;
+        function walk2(f) {
+          if (!f || seen2.has(f)) return;
+          seen2.add(f);
+          const n =
+            f.elementType?.name || f.elementType?.displayName || "";
+          if (
+            n === "ExcalidrawElementsContext" &&
+            f.child?.memoizedProps?.value &&
+            Array.isArray(f.child.memoizedProps.value)
+          ) {
+            latest = f.child.memoizedProps.value;
+            return; // found it
+          }
+          let c = f.child;
+          while (c) {
+            walk2(c);
+            c = c.sibling;
+          }
+        }
+        walk2(root[containerKey]);
+        return latest || [];
+      };
+      return true;
+    }
+    return false;
+  }
+
+  // ---- Excalidraw scene helpers --------------------------------------------
+  function getCodeElement(elements) {
+    if (!elements) return null;
+    for (const el of elements) {
+      if (el.id === CODE_ELEMENT_ID || el.text?.startsWith?.("__CODECANVAS__")) {
+        return el;
+      }
+    }
+    return null;
+  }
+
+  function extractCodeFromElement(el) {
+    if (!el || !el.text) return null;
+    // Format: __CODECANVAS__|||<base64-encoded-code>|||
+    // We use a delimiter to avoid URL encoding issues with arbitrary HTML
+    const prefix = "__CODECANVAS__|||";
+    const suffix = "|||";
+    const raw = el.text;
+    if (!raw.startsWith(prefix) || !raw.endsWith(suffix)) return null;
+    const encoded = raw.slice(prefix.length, -suffix.length);
+    try {
+      return decodeURIComponent(escape(atob(encoded)));
+    } catch {
+      return null;
+    }
+  }
+
+  function encodeCodeForElement(code) {
+    const prefix = "__CODECANVAS__|||";
+    const suffix = "|||";
+    try {
+      const encoded = btoa(unescape(encodeURIComponent(code)));
+      return prefix + encoded + suffix;
+    } catch {
+      // Fallback for very large codes — truncate if necessary
+      return prefix + btoa(code.slice(0, 50000)) + suffix;
+    }
+  }
+
+  function hashCode(str) {
+    let hash = 0;
+    for (let i = 0; i < str.length; i++) {
+      const chr = str.charCodeAt(i);
+      hash = ((hash << 5) - hash) + chr;
+      hash |= 0;
+    }
+    return hash;
+  }
+
+  function updateCodeElement(code) {
+    if (!excalidrawAPI || !excalidrawAPI.ready) return;
+
+    const elements = getElements();
+    if (!elements) return;
+
+    const existing = getCodeElement(elements);
+    const text = encodeCodeForElement(code);
+
+    if (existing) {
+      // Update existing element
+      excalidrawAPI.updateScene({
+        elements: elements.map((el) =>
+          el.id === CODE_ELEMENT_ID ? { ...el, text } : el
+        ),
+      });
+    } else {
+      // Create new hidden text element way off-screen
+      const newEl = {
+        id: CODE_ELEMENT_ID,
+        type: "text",
+        x: -99999,
+        y: -99999,
+        width: 1,
+        height: 1,
+        text,
+        fontSize: 1,
+        fontFamily: 1,
+        textAlign: "left",
+        verticalAlign: "top",
+        strokeColor: "#000000",
+        backgroundColor: "transparent",
+        fillStyle: "solid",
+        strokeWidth: 1,
+        roughness: 1,
+        opacity: 0,
+        angle: 0,
+        groupIds: [],
+        boundElements: null,
+        isDeleted: false,
+        seed: Math.floor(Math.random() * 1000000),
+        containerId: null,
+        originalText: text,
+        autoResize: true,
+        updated: Date.now(),
+        version: 1,
+      };
+      excalidrawAPI.updateScene({
+        elements: [...elements, newEl],
+      });
+    }
+  }
+
+  function pollForRemoteChanges() {
+    if (!excalidrawAPI || !getElements) return;
+
+    // Don't overwrite while user is actively typing
+    if (Date.now() - lastLocalEditAt < REMOTE_SUPPRESS_WINDOW_MS) return;
+
+    const elements = getElements();
+    if (!elements) return;
+
+    const codeEl = getCodeElement(elements);
+    if (!codeEl) return;
+
+    const code = extractCodeFromElement(codeEl);
+    if (!code) return;
+
+    const hash = hashCode(code);
+    if (hash === knownCodeHash) return; // no change
+
+    knownCodeHash = hash;
+
+    // Update the editor and preview if this is a remote change
+    if (editorEl && editorEl.value !== code) {
+      const hadFocus = document.activeElement === editorEl;
+      editorEl.value = code;
+      updateGutter();
+      runPreview();
+      saveCachedCode(code);
+      if (hadFocus) {
+        editorEl.selectionStart = editorEl.selectionEnd = editorEl.value.length;
+      }
+    }
+  }
+
+  // ---- Local cache (instant restore on refresh) ---------------------------
   function getRoomId() {
     const hash = window.location.hash || "";
     if (hash.length > 1) return hash.slice(1);
@@ -31,24 +259,7 @@
 
   const roomId = getRoomId();
   const storageKey = "codecanvas:" + (roomId || "local");
-  const clientId = (window.crypto && window.crypto.randomUUID)
-    ? window.crypto.randomUUID()
-    : "c" + Math.random().toString(36).slice(2);
 
-  // ---- State ---------------------------------------------------------------
-  let panelEl = null;
-  let editorEl = null;
-  let previewEl = null;
-  let statusEl = null;
-  let gutterEl = null;
-  let ws = null;
-  let reconnectDelay = RECONNECT_BASE_DELAY_MS;
-  let reconnectTimer = null;
-  let broadcastTimer = null;
-  let lastLocalEditAt = 0;
-  let currentCode = loadCachedCode() || DEFAULT_CODE;
-
-  // ---- Local cache (instant restore on refresh, works even with no relay) -
   function loadCachedCode() {
     try {
       return window.localStorage.getItem(storageKey);
@@ -61,11 +272,11 @@
     try {
       window.localStorage.setItem(storageKey, code);
     } catch {
-      /* ignore quota/availability errors */
+      /* ignore */
     }
   }
 
-  // ---- Build the floating toggle button (sits next to Excalidraw's own UI) -
+  // ---- Build the floating toggle button ------------------------------------
   function createToggleButton() {
     const btn = document.createElement("button");
     btn.id = "cc-toggle-launcher";
@@ -81,14 +292,14 @@
     document.body.appendChild(btn);
   }
 
-  // ---- Build the panel itself -----------------------------------------------
+  // ---- Build the panel ------------------------------------------------------
   function buildPanel() {
     panelEl = document.createElement("div");
     panelEl.id = "cc-panel";
     panelEl.innerHTML = `
       <div id="cc-header">
         <span id="cc-title">&lt;/&gt; Code Canvas</span>
-        <span id="cc-status">local only</span>
+        <span id="cc-status">connecting…</span>
         <button id="cc-min-btn" title="Collapse">_</button>
         <button id="cc-close-btn" title="Close">&times;</button>
       </div>
@@ -123,7 +334,22 @@
     const header = panelEl.querySelector("#cc-header");
     const resizeHandle = panelEl.querySelector("#cc-resize-handle");
 
-    editorEl.value = currentCode;
+    // Load cached code or default
+    let initialCode = loadCachedCode() || DEFAULT_CODE;
+
+    // If we already have a known code from the scene, use that instead
+    const elements = getElements ? getElements() : null;
+    if (elements) {
+      const codeEl = getCodeElement(elements);
+      const code = codeEl ? extractCodeFromElement(codeEl) : null;
+      if (code) {
+        initialCode = code;
+        knownCodeHash = hashCode(code);
+      }
+    }
+
+    editorEl.value = initialCode;
+    currentCode = initialCode;
     updateGutter();
     runPreview();
 
@@ -147,9 +373,97 @@
     makeDraggable(header, panelEl);
     makeResizable(resizeHandle, panelEl);
 
-    connectRelay();
+    // Broadcast to Excalidraw scene
+    updateCodeElement(currentCode);
+    setStatus("live · Excalidraw sync", "cc-live");
   }
 
+  let currentCode = "";
+  let broadcastTimer = null;
+
+  function onLocalEdit() {
+    updateGutter();
+    lastLocalEditAt = Date.now();
+    currentCode = editorEl.value;
+    saveCachedCode(currentCode);
+    knownCodeHash = hashCode(currentCode);
+
+    clearTimeout(broadcastTimer);
+    broadcastTimer = setTimeout(() => {
+      runPreview();
+      // Broadcast to Excalidraw's scene — their collaboration server syncs it
+      if (excalidrawAPI && excalidrawAPI.ready) {
+        updateCodeElement(currentCode);
+      }
+    }, 350);
+  }
+
+  let lastCodeForPreview = "";
+
+  function updateGutter() {
+    const lineCount = (editorEl.value.match(/\n/g) || []).length + 1;
+    let html = "";
+    for (let i = 1; i <= lineCount; i++) html += "<div>" + i + "</div>";
+    if (gutterEl) gutterEl.innerHTML = html;
+  }
+
+  function runPreview() {
+    if (previewEl && editorEl.value !== lastCodeForPreview) {
+      previewEl.srcdoc = editorEl.value;
+      lastCodeForPreview = editorEl.value;
+    }
+  }
+
+  // ---- Dragging / resizing -------------------------------------------------
+  function makeDraggable(handleEl, targetEl) {
+    let startX, startY, startLeft, startTop, dragging = false;
+    handleEl.addEventListener("mousedown", (e) => {
+      if (e.target.tagName === "BUTTON") return;
+      dragging = true;
+      startX = e.clientX;
+      startY = e.clientY;
+      const rect = targetEl.getBoundingClientRect();
+      startLeft = rect.left;
+      startTop = rect.top;
+      targetEl.style.right = "auto";
+      e.preventDefault();
+    });
+    window.addEventListener("mousemove", (e) => {
+      if (!dragging) return;
+      targetEl.style.left = startLeft + (e.clientX - startX) + "px";
+      targetEl.style.top = startTop + (e.clientY - startY) + "px";
+    });
+    window.addEventListener("mouseup", () => { dragging = false; });
+  }
+
+  function makeResizable(handleEl, targetEl) {
+    let startX, startY, startW, startH, resizing = false;
+    handleEl.addEventListener("mousedown", (e) => {
+      resizing = true;
+      startX = e.clientX;
+      startY = e.clientY;
+      const rect = targetEl.getBoundingClientRect();
+      startW = rect.width;
+      startH = rect.height;
+      e.preventDefault();
+      e.stopPropagation();
+    });
+    window.addEventListener("mousemove", (e) => {
+      if (!resizing) return;
+      targetEl.style.width = Math.max(380, startW + (e.clientX - startX)) + "px";
+      targetEl.style.height = Math.max(220, startH + (e.clientY - startY)) + "px";
+    });
+    window.addEventListener("mouseup", () => { resizing = false; });
+  }
+
+  // ---- Status ---------------------------------------------------------------
+  function setStatus(text, cls) {
+    if (!statusEl) return;
+    statusEl.textContent = text;
+    statusEl.className = cls || "";
+  }
+
+  // ---- Styles ---------------------------------------------------------------
   function injectStyles() {
     if (document.getElementById("cc-styles")) return;
     const style = document.createElement("style");
@@ -236,174 +550,10 @@
     document.head.appendChild(style);
   }
 
-  // ---- Editor / preview behaviour ----------------------------------------
-  function updateGutter() {
-    const lineCount = (editorEl.value.match(/\n/g) || []).length + 1;
-    let html = "";
-    for (let i = 1; i <= lineCount; i++) html += "<div>" + i + "</div>";
-    gutterEl.innerHTML = html;
-  }
-
-  function runPreview() {
-    previewEl.srcdoc = editorEl.value;
-  }
-
-  function onLocalEdit() {
-    updateGutter();
-    lastLocalEditAt = Date.now();
-    currentCode = editorEl.value;
-    saveCachedCode(currentCode);
-
-    clearTimeout(broadcastTimer);
-    broadcastTimer = setTimeout(() => {
-      runPreview();
-      sendUpdate(currentCode);
-    }, BROADCAST_DEBOUNCE_MS);
-  }
-
-  function applyRemoteCode(code) {
-    if (code == null || code === currentCode) return;
-    // Don't clobber someone mid-keystroke - their next edit will broadcast
-    // and reconcile shortly after anyway.
-    if (Date.now() - lastLocalEditAt < REMOTE_SUPPRESS_WINDOW_MS) return;
-
-    const hadFocus = document.activeElement === editorEl;
-    currentCode = code;
-    editorEl.value = code;
-    saveCachedCode(code);
-    updateGutter();
-    runPreview();
-    if (hadFocus) {
-      editorEl.selectionStart = editorEl.selectionEnd = editorEl.value.length;
-    }
-  }
-
-  // ---- Dragging / resizing -------------------------------------------------
-  function makeDraggable(handleEl, targetEl) {
-    let startX, startY, startLeft, startTop, dragging = false;
-    handleEl.addEventListener("mousedown", (e) => {
-      if (e.target.tagName === "BUTTON") return;
-      dragging = true;
-      startX = e.clientX;
-      startY = e.clientY;
-      const rect = targetEl.getBoundingClientRect();
-      startLeft = rect.left;
-      startTop = rect.top;
-      targetEl.style.right = "auto";
-      e.preventDefault();
-    });
-    window.addEventListener("mousemove", (e) => {
-      if (!dragging) return;
-      targetEl.style.left = startLeft + (e.clientX - startX) + "px";
-      targetEl.style.top = startTop + (e.clientY - startY) + "px";
-    });
-    window.addEventListener("mouseup", () => {
-      dragging = false;
-    });
-  }
-
-  function makeResizable(handleEl, targetEl) {
-    let startX, startY, startW, startH, resizing = false;
-    handleEl.addEventListener("mousedown", (e) => {
-      resizing = true;
-      startX = e.clientX;
-      startY = e.clientY;
-      const rect = targetEl.getBoundingClientRect();
-      startW = rect.width;
-      startH = rect.height;
-      e.preventDefault();
-      e.stopPropagation();
-    });
-    window.addEventListener("mousemove", (e) => {
-      if (!resizing) return;
-      targetEl.style.width = Math.max(380, startW + (e.clientX - startX)) + "px";
-      targetEl.style.height = Math.max(220, startH + (e.clientY - startY)) + "px";
-    });
-    window.addEventListener("mouseup", () => {
-      resizing = false;
-    });
-  }
-
-  // ---- Relay connection ------------------------------------------------------
-  function setStatus(text, cls) {
-    if (!statusEl) return;
-    statusEl.textContent = text;
-    statusEl.className = cls || "";
-  }
-
-  function connectRelay() {
-    if (!roomId) {
-      setStatus("local only (no room)", "");
-      return;
-    }
-    if (!RELAY_URL || RELAY_URL.includes("YOUR-DEPLOYED-HOST-HERE")) {
-      setStatus("local only (relay not configured)", "");
-      return;
-    }
-
-    setStatus("connecting\u2026", "cc-connecting");
-    try {
-      ws = new WebSocket(RELAY_URL);
-    } catch {
-      setStatus("local only (relay unreachable)", "");
-      return;
-    }
-
-    ws.addEventListener("open", () => {
-      reconnectDelay = RECONNECT_BASE_DELAY_MS;
-      ws.send(JSON.stringify({ type: "join", room: roomId }));
-      setStatus("live", "cc-live");
-    });
-
-    ws.addEventListener("message", (event) => {
-      let msg;
-      try {
-        msg = JSON.parse(event.data);
-      } catch {
-        return;
-      }
-      if (msg.type === "init") {
-        // Server's stored code wins over our local cache only if it actually
-        // has something - otherwise keep whatever we restored from cache.
-        if (msg.code != null) applyRemoteCode(msg.code);
-        setStatus("live", "cc-live");
-      } else if (msg.type === "update") {
-        applyRemoteCode(msg.code);
-      } else if (msg.type === "peers") {
-        const n = msg.count || 1;
-        setStatus("live \u00b7 " + n + (n === 1 ? " here" : " here"), "cc-live");
-      }
-    });
-
-    ws.addEventListener("close", scheduleReconnect);
-    ws.addEventListener("error", () => {
-      setStatus("reconnecting\u2026", "cc-connecting");
-    });
-  }
-
-  function scheduleReconnect() {
-    setStatus("reconnecting\u2026", "cc-connecting");
-    clearTimeout(reconnectTimer);
-    reconnectTimer = setTimeout(() => {
-      reconnectDelay = Math.min(reconnectDelay * 1.6, RECONNECT_MAX_DELAY_MS);
-      connectRelay();
-    }, reconnectDelay);
-  }
-
-  function sendUpdate(code) {
-    if (ws && ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify({ type: "update", room: roomId, code }));
-    }
-  }
-
-  // ---- Fix the green dot in Excalidraw's own toolbar --------
-  // The compiled bundle has a green dot that opens sandbox.html (now deleted).
-  // We rename it, change its icon, and wire it to our panel instead.
-  // Uses event delegation so it survives React re-renders.
+  // ---- Fix the green dot ----------------------------------------------------
   let greenDotDelegationWired = false;
 
   function fixGreenDot() {
-    // Find the green dot label/button (original title or already-renamed)
     const labels = document.querySelectorAll(
       'label[title="Open Code Sandbox"], label[title="Code Canvas"]'
     );
@@ -414,7 +564,6 @@
       const btn = label.querySelector("button");
       if (btn) {
         btn.setAttribute("aria-label", "Code Canvas");
-        // Replace the green circle with a </> icon (if not already done)
         const svg = btn.querySelector("svg");
         if (svg && !svg.innerHTML.includes("&lt;/&gt;")) {
           svg.innerHTML = `
@@ -424,9 +573,7 @@
         }
       }
     }
-    // Wire one global delegation listener on body (capture phase, survives React)
     if (found) {
-      // Remove old listener if re-wiring
       if (greenDotDelegationWired) {
         document.body.removeEventListener("click", greenDotClickHandler, true);
       }
@@ -435,31 +582,22 @@
     }
   }
 
-  // Separate handler so we can remove/re-add it
   function greenDotClickHandler(e) {
-    // Check if the click landed on or inside the code canvas button
     const btn = e.target.closest('button[aria-label="Code Canvas"]');
     if (btn) {
       e.preventDefault();
       e.stopPropagation();
-      if (!panelEl) {
-        buildPanel();
-      }
+      if (!panelEl) buildPanel();
       panelEl.classList.toggle("cc-hidden");
     }
   }
 
   // ---- Boot -----------------------------------------------------------------
-  // Excalidraw's React SPA aggressively re-renders its DOM, especially when
-  // joining a room ("Loading scene…" phase). We use a resilient polling loop
-  // that re-injects the button any time it disappears, even across multiple
-  // React re-renders.
   function ensureInject() {
     if (!document.getElementById("cc-toggle-launcher")) {
       createToggleButton();
     }
     fixGreenDot();
-    // If the panel was built but disappeared, reset so next click rebuilds it
     if (panelEl && !document.body.contains(panelEl)) {
       panelEl = null;
       editorEl = null;
@@ -469,10 +607,28 @@
     }
   }
 
-  // Initial injection after DOM is ready
   function boot() {
+    // First, find the Excalidraw API
+    // Retry finding it since Excalidraw might still be initializing
+    let attempts = 0;
+    const maxAttempts = 50; // ~25 seconds
+    const findInterval = setInterval(() => {
+      attempts++;
+      if (findExcalidrawAPI()) {
+        clearInterval(findInterval);
+        console.log("[CodeCanvas] Hooked into Excalidraw API");
+        setStatus("ready", "cc-live");
+        // Start polling for remote changes
+        setInterval(pollForRemoteChanges, POLL_INTERVAL_MS);
+      } else if (attempts >= maxAttempts) {
+        clearInterval(findInterval);
+        console.warn("[CodeCanvas] Could not find Excalidraw API — will work in local-only mode");
+        setStatus("local only", "");
+      }
+    }, 500);
+
+    // Inject the UI button immediately
     ensureInject();
-    // Poll every 500ms — survives React re-rendering DOM at any point
     setInterval(ensureInject, 500);
   }
 
